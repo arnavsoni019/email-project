@@ -1,0 +1,21 @@
+# Secrets & private data — never commit these
+.env
+# SQLite DB, OAuth token, client secret, cached email:
+data/
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# Local AI-assistant working notes — not part of the project's authored history
+CLAUDE.md
