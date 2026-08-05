@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     # Reachable over the shared network at localhost even from the Flatpak sandbox.
     ollama_host: str = "http://localhost:11434"
     # Two-tier split sized around the RTX 4060's 8 GB VRAM.
-    model_light: str = "gemma4:e4b"   # resident, used for bulk work (categorise/triage)
-    model_heavy: str = "gemma4:12b"   # loaded on demand for harder single tasks
+    model_light: str = "gemma4:e4b"          # resident, used for bulk work (categorise/triage)
+    model_heavy: str = "gemma4:12b-it-qat"   # on-demand; QAT build — faster + richer than plain 12b
     embed_model: str = "nomic-embed-text"  # Phase 4 (RAG) — not pulled yet
 
     # ---- Storage ------------------------------------------------------------
