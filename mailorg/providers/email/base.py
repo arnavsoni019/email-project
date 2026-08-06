@@ -26,6 +26,7 @@ class EmailMessage:
     id: str                      # provider message id (Gmail message id)
     thread_id: str               # provider thread/conversation id
     from_addr: str               # sender email, e.g. "alice@example.com"
+    from_name: str               # sender display name, e.g. "ICICI Direct" (may be "")
     to_addrs: list[str]          # recipient emails
     cc_addrs: list[str]          # cc'd emails
     subject: str

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS messages (
     id             TEXT PRIMARY KEY,        -- Gmail message id
     thread_id      TEXT,
     from_addr      TEXT,
+    from_name      TEXT,                    -- sender display name ("ICICI Direct"), may be ''
     to_addrs       TEXT,                    -- JSON array
     cc_addrs       TEXT,                    -- JSON array
     subject        TEXT,
@@ -100,13 +101,29 @@ def get_conn(db_path: str | Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the initial schema shipped. CREATE TABLE IF NOT EXISTS will not
+# add these to a database that already exists, so apply them explicitly.
+_MIGRATIONS: list[tuple[str, str, str]] = [
+    ("messages", "from_name", "ALTER TABLE messages ADD COLUMN from_name TEXT"),
+]
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add any columns missing from an existing database (idempotent)."""
+    for table, column, ddl in _MIGRATIONS:
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(ddl)
+
+
 def init_db(conn: sqlite3.Connection | None = None) -> None:
-    """Create tables (idempotent) and seed the category taxonomy from settings."""
+    """Create tables (idempotent), apply migrations, and seed categories."""
     own_conn = conn is None
     if own_conn:
         conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
         conn.executemany(
             "INSERT OR IGNORE INTO categories(name) VALUES (?)",
             [(c,) for c in get_settings().categories],

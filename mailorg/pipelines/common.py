@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..textclean import clean_body
+
 # Local models are slower and have limited context; a few thousand chars of body is
 # plenty to classify/summarise an email and keeps each call fast.
 BODY_CHAR_LIMIT = 2000
@@ -10,8 +12,13 @@ BODY_CHAR_LIMIT = 2000
 def format_email_for_llm(
     *, from_addr: str, subject: str, body_text: str, snippet: str = ""
 ) -> str:
-    """Render an email into a compact prompt block, truncating long bodies."""
-    body = (body_text or snippet or "").strip()
+    """Render an email into a compact prompt block, truncating long bodies.
+
+    The body is cleaned first (tracking URLs and navigational boilerplate removed) so
+    the limited character budget holds actual content — in marketing mail more than
+    half the raw text is click-tracking URLs.
+    """
+    body = clean_body(body_text or "") or (snippet or "").strip()
     if len(body) > BODY_CHAR_LIMIT:
         body = body[:BODY_CHAR_LIMIT] + "\n...[truncated]"
     return (

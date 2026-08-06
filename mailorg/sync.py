@@ -25,12 +25,13 @@ from .providers.email.gmail import GmailProvider
 # Only these raw columns are overwritten on conflict. LLM columns are omitted on purpose.
 _UPSERT_MESSAGE = """
 INSERT INTO messages
-    (id, thread_id, from_addr, to_addrs, cc_addrs, subject, snippet, body_text,
+    (id, thread_id, from_addr, from_name, to_addrs, cc_addrs, subject, snippet, body_text,
      ts, label_ids, is_unread, size_estimate)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     thread_id     = excluded.thread_id,
     from_addr     = excluded.from_addr,
+    from_name     = excluded.from_name,
     to_addrs      = excluded.to_addrs,
     cc_addrs      = excluded.cc_addrs,
     subject       = excluded.subject,
@@ -81,6 +82,7 @@ def upsert_message(conn: sqlite3.Connection, msg: EmailMessage) -> None:
             msg.id,
             msg.thread_id,
             msg.from_addr,
+            msg.from_name,
             json.dumps(msg.to_addrs),
             json.dumps(msg.cc_addrs),
             msg.subject,

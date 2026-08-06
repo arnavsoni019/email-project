@@ -22,8 +22,51 @@ from googleapiclient.errors import HttpError
 from ...config import Settings, get_settings
 from .base import EmailMessage, EmailProvider, HistoryChanges
 
-_TAG_RE = re.compile(r"<[^>]+>")
+# <style>/<script>/<head> must be dropped WITH their contents — stripping only the tags
+# leaves raw CSS/JS in the body text, which then pollutes the UI and the LLM prompt.
+_DROP_BLOCK_RE = re.compile(r"<(style|script|head|noscript)\b[^>]*>.*?</\1\s*>", re.S | re.I)
+_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+# Structural tags that should become line breaks so paragraphs survive.
+_BREAK_RE = re.compile(r"<br\s*/?>|</(p|div|tr|li|h[1-6]|table|blockquote)\s*>", re.I)
+# Tolerates ">" inside quoted attribute values, e.g. <a data-x="a>b" style="...">.
+# A plain <[^>]+> stops at the inner ">" and leaves half the tag as visible text.
+_TAG_RE = re.compile(r"""<[a-zA-Z/!?][^>"']*(?:(?:"[^"]*"|'[^']*')[^>"']*)*>""", re.S)
+# Fallback for malformed tags with an unbalanced quote, which defeat the pattern above.
+# Bounded length so it can never swallow a large span of real text.
+_TAG_SIMPLE_RE = re.compile(r"<[a-zA-Z/!?][^<>]{0,2000}?>", re.S)
 _WS_RE = re.compile(r"[ \t]*\n[ \t\n]*")
+_BLANKS_RE = re.compile(r"\n{3,}")
+
+# Final safety net. Real emails are messy: senders leave bare CSS in their *plain-text*
+# alternative, and attribute values containing ">" defeat a simple tag regex. These
+# patterns clean up whatever survives, whichever route the text arrived by.
+_AT_RULE_RE = re.compile(
+    r"@(media|import|font-face|charset|supports)\b[^{;]*(\{[^{}]*(\{[^{}]*\}[^{}]*)*\}|;)",
+    re.S | re.I,
+)
+# A CSS selector token: tag/class/id, optional pseudo, attribute or combinator.
+# Deliberately strict — prose must never match, or real sentences get eaten.
+_SEL = r"[.#]?[A-Za-z][\w\-]*(?:\[[^\]]{0,60}\])?(?:::?[\w\-()]+)?"
+# A CSS rule: selectors, then a brace block that is clearly CSS — it must contain a
+# colon AND a stronger signal (a semicolon, !important, or a hyphenated property).
+# Without that second test, prose like "config {timeout: 30}" would be stripped.
+_CSS_BODY = r"\{(?=[^{}]*:)[^{}]*(?:;|!important|[a-z]+-[a-z]+\s*:)[^{}]*\}"
+_CSS_RULE_RE = re.compile(
+    rf"{_SEL}(?:\s*[,>+~]\s*{_SEL})*\s*{_CSS_BODY}", re.S
+)
+# An unterminated tag running to end of input (truncated bodies).
+_TAG_FRAG_RE = re.compile(r"<[a-zA-Z/][^<>]{0,400}$", re.S)
+
+
+def _scrub_css(text: str) -> str:
+    """Remove CSS rule blocks and stray tag fragments from already-extracted text."""
+    text = _AT_RULE_RE.sub(" ", text)
+    prev = None
+    while prev != text:  # nested/consecutive rule blocks
+        prev = text
+        text = _CSS_RULE_RE.sub(" ", text)
+    text = _TAG_FRAG_RE.sub(" ", text)
+    return text
 
 
 class GmailProvider(EmailProvider):
@@ -126,6 +169,7 @@ class GmailProvider(EmailProvider):
             id=raw["id"],
             thread_id=raw.get("threadId", raw["id"]),
             from_addr=_first_addr(headers.get("from", "")),
+            from_name=_first_name(headers.get("from", "")),
             to_addrs=_all_addrs(headers.get("to", "")),
             cc_addrs=_all_addrs(headers.get("cc", "")),
             subject=headers.get("subject", ""),
@@ -179,9 +223,46 @@ def _decode(data: str) -> str:
 
 
 def _strip_html(raw_html: str) -> str:
-    text = _TAG_RE.sub(" ", raw_html)
+    """Best-effort plain text from an HTML email body.
+
+    Order matters: drop comments and style/script blocks (with their contents) first,
+    then turn structural tags into line breaks, then remove what's left. Doing this the
+    other way round leaves stylesheet text in the output.
+    """
+    text = _COMMENT_RE.sub(" ", raw_html)
+    text = _DROP_BLOCK_RE.sub(" ", text)
+    text = _BREAK_RE.sub("\n", text)
+    text = _TAG_RE.sub(" ", text)
+    text = _TAG_SIMPLE_RE.sub(" ", text)  # malformed tags the quote-aware pass missed
+    text = _scrub_css(text)  # catch what malformed markup let through
     text = html.unescape(text)
-    return _WS_RE.sub("\n", text).strip()
+    text = text.replace(" ", " ").replace("‌", "")  # nbsp, zero-width non-joiner
+    text = _WS_RE.sub("\n", text)
+    text = _BLANKS_RE.sub("\n\n", text)
+    return text.strip()
+
+
+# Any common tag — senders embed inline markup (<a>, <span style=...>) in text/plain
+# parts without a surrounding <html>, so looking only for document-level tags misses them.
+_HTML_HINT_RE = re.compile(
+    r"</?(?:html|body|head|style|script|div|span|table|tbody|tr|td|p|br|img|a|strong|b|em|font|ul|li|h[1-6])\b[^>]*>",
+    re.I,
+)
+
+
+def _looks_like_html(text: str) -> bool:
+    """True when text declared as plain actually carries HTML markup.
+
+    Requires two or more tags so an isolated "<3" or a stray angle bracket in prose
+    does not trigger stripping.
+    """
+    sample = text[:20000]
+    hits = 0
+    for _ in _HTML_HINT_RE.finditer(sample):
+        hits += 1
+        if hits >= 2:
+            return True
+    return False
 
 
 def _extract_body(payload: dict) -> str:
@@ -190,7 +271,11 @@ def _extract_body(payload: dict) -> str:
     body_data = payload.get("body", {}).get("data")
 
     if mime == "text/plain" and body_data:
-        return _decode(body_data)
+        text = _decode(body_data)
+        # Trust the content over the declared type.
+        if _looks_like_html(text):
+            return _strip_html(text)
+        return _BLANKS_RE.sub("\n\n", _scrub_css(text)).strip()
 
     parts = payload.get("parts")
     if parts:
@@ -214,6 +299,24 @@ def _extract_body(payload: dict) -> str:
 def _first_addr(header_value: str) -> str:
     addrs = _all_addrs(header_value)
     return addrs[0] if addrs else ""
+
+
+def _first_name(header_value: str) -> str:
+    """Display name from a From header ("ICICI Direct" <x@y.com> -> "ICICI Direct").
+
+    Falls back to the address' local part when no display name is present, so the UI
+    always has something human-readable to show.
+    """
+    if not header_value:
+        return ""
+    parsed = getaddresses([header_value])
+    if not parsed:
+        return ""
+    name, addr = parsed[0]
+    name = name.strip().strip('"')
+    if name:
+        return name
+    return addr.split("@")[0] if addr else ""
 
 
 def _all_addrs(header_value: str) -> list[str]:
