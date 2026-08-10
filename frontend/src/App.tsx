@@ -7,6 +7,7 @@ import { Icon, Sprite } from "./Sprite";
 import {
   api,
   type AppSettings,
+  type JobStatus,
   type Message,
   type MessageDetail,
   type ProposedAction,
@@ -62,6 +63,7 @@ export default function App() {
   const [q, setQ] = useState("");
   const [loading, setLoading] = useState(false);
   const [syncedAt, setSyncedAt] = useState<number | null>(null);
+  const [job, setJob] = useState<JobStatus | null>(null);
   const [tick, setTick] = useState(0); // re-render so "4m ago" stays current
 
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -154,6 +156,14 @@ export default function App() {
     return `${Math.round(secs / 86400)}d ago`;
   }, [syncedAt, tick]);
 
+  // While a job runs the "4m ago" slot shows live progress instead.
+  const jobLabel = useMemo(() => {
+    if (!job || job.state === "idle") return syncAgo;
+    if (job.state === "error") return "failed";
+    if (job.state === "done") return "just now";
+    return job.total ? `${job.done}/${job.total}` : job.phase;
+  }, [job, syncAgo]);
+
   // --- derived -------------------------------------------------------------
   const live = useMemo(
     () => messages.filter((e) => !archived.includes(e.id)),
@@ -245,9 +255,31 @@ export default function App() {
     setTimer("theme", () => setTheming(undefined), 260);
   }, []);
 
-  const doSync = useCallback(() => {
+  // Sync and enrichment run as a background job on the server (minutes, not
+  // milliseconds), so this kicks it off and then polls /api/job for progress.
+  const doSync = useCallback(async () => {
     setLoading(true);
-    reload().finally(() => setTimer("sync", () => setLoading(false), 400));
+    try {
+      await api.startSync({ max_messages: 50, process: true });
+    } catch {
+      // 409 means a job is already running — join its progress rather than fail.
+    }
+    const poll = async () => {
+      try {
+        const j = await api.job();
+        setJob(j);
+        if (j.state === "running") {
+          setTimer("job", poll, 1000);
+          return;
+        }
+        await reload();
+      } catch {
+        /* server went away; stop polling rather than spin */
+      }
+      setLoading(false);
+      setTimer("jobClear", () => setJob(null), 4000);
+    };
+    poll();
   }, [reload]);
 
   // --- keyboard (exact bindings from the design) ---------------------------
@@ -359,7 +391,12 @@ export default function App() {
                     <Icon id="ap-sync" />
                   </span>
                   <span style={{ fontSize: "12.5px", fontWeight: 600 }}>Sync</span>
-                  <span style={{ marginLeft: "auto", fontSize: "11px", color: "var(--fg5)" }}>{syncAgo}</span>
+                  <span
+                    style={{ marginLeft: "auto", fontSize: "11px", color: job?.state === "error" ? "var(--warn-t)" : "var(--fg5)", fontVariantNumeric: "tabular-nums" }}
+                    title={job?.error ?? undefined}
+                  >
+                    {jobLabel}
+                  </span>
                 </button>
               </div>
             )}

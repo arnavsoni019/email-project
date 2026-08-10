@@ -15,9 +15,10 @@ export function Digest(p: SharedProps) {
 
   const open = (id: string) => { goScreen("inbox"); select(id); };
 
-  const tiles = [
+  // `accent` tints the figure with the blue accent — the one number worth looking at.
+  const tiles: { label: string; value: number; note: string; accent?: boolean }[] = [
     { label: "Conversations", value: live.length, note: "in the inbox" },
-    { label: "Needs action", value: action.length, note: action.length === 1 ? "one real task" : "tasks waiting" },
+    { label: "Needs action", value: action.length, note: action.length === 1 ? "one real task" : "tasks waiting", accent: true },
     { label: "Filtered out", value: noise.length, note: `${Math.round((noise.length / Math.max(live.length, 1)) * 100)}% was noise` },
   ];
 
@@ -39,7 +40,7 @@ export function Digest(p: SharedProps) {
           {tiles.map((t) => (
             <div key={t.label} style={glass({ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "3px" })}>
               <div style={{ fontSize: "11.5px", fontWeight: 600, color: "var(--fg4)" }}>{t.label}</div>
-              <div style={{ fontSize: "27px", fontWeight: 600, letterSpacing: "-.03em", fontVariantNumeric: "tabular-nums", lineHeight: 1.15 }}>
+              <div style={{ fontSize: "27px", fontWeight: 600, letterSpacing: "-.03em", fontVariantNumeric: "tabular-nums", lineHeight: 1.15, color: t.accent ? "var(--acc-t)" : "var(--fg1)" }}>
                 {t.value}
               </div>
               <div style={{ fontSize: "11.5px", color: "var(--fg5)" }}>{t.note}</div>

@@ -36,12 +36,23 @@ class Settings(BaseSettings):
     # Reachable over the shared network at localhost even from the Flatpak sandbox.
     ollama_host: str = "http://localhost:11434"
     # Two-tier split sized around the RTX 4060's 8 GB VRAM.
-    model_light: str = "gemma4:e4b"          # resident, used for bulk work (categorise/triage)
-    model_heavy: str = "gemma4:12b-it-qat"   # on-demand; QAT build — faster + richer than plain 12b
-    embed_model: str = "nomic-embed-text"  # Phase 4 (RAG) — not pulled yet
+    # Benchmarked on the 4060 (8 GB): qwen3.5:9b fits 100% in VRAM at 2.3 s/email, vs
+    # gemma4:e4b 12.6 s and gemma4:12b-it-qat 92.4 s (the latter two spill or thrash).
+    # Its reasoning mode must stay OFF for bulk work — see get_light_llm().
+    model_light: str = "qwen3.5:9b"          # resident, used for bulk work (categorise/triage)
+    model_heavy: str = "gemma4:12b-it-qat"   # on-demand; revisit once Phase 4 Ask exists
+    embed_model: str = "nomic-embed-text"    # Phase 4 (RAG) — 768-dim vectors
 
     # ---- Storage ------------------------------------------------------------
     db_path: Path = REPO_ROOT / "data" / "mailorg.db"
+    # ChromaDB persists the vector index here. SQLite stays the system of record; this
+    # is a derived index that can be deleted and rebuilt at any time.
+    chroma_path: Path = REPO_ROOT / "data" / "chroma"
+
+    # ---- RAG tuning ---------------------------------------------------------
+    # How many chunks to retrieve per question. Too few misses the answer; too many
+    # dilutes the prompt and slows the (already slow) heavy model.
+    rag_top_k: int = 6
 
     # ---- Privacy / cloud opt-in ---------------------------------------------
     # Master switch. When False, NOTHING may ever call the cloud, regardless of the

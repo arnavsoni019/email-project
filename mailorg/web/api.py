@@ -22,7 +22,13 @@ from pydantic import BaseModel
 
 from ..config import get_settings
 from ..db import get_conn, init_db
+from ..pipelines.run import _select_messages, process_message
+from ..providers.email.gmail import GmailProvider
+from ..rag.index import build_index
+from ..rag.qa import ask
+from ..sync import sync
 from ..textclean import clean_body
+from . import jobs
 
 app = FastAPI(title="mailorg", version="0.1.0")
 
@@ -105,12 +111,18 @@ def _row_to_summary(row: sqlite3.Row) -> dict[str, Any]:
 
 
 # --- messages ---------------------------------------------------------------
+# The inbox shows a recent working set rather than the whole archive: enrichment is
+# re-run over the newest N messages, so anything older still carries results from an
+# earlier model and would make the list inconsistent to judge.
+DEFAULT_LIMIT = 40
+
+
 @app.get("/api/messages")
 def list_messages(
     prio: str | None = None,
     cat: str | None = None,
     q: str | None = None,
-    limit: int = 200,
+    limit: int = DEFAULT_LIMIT,
 ) -> dict[str, Any]:
     """Inbox list, newest first, with optional priority/category/search filters."""
     sql = "SELECT * FROM messages WHERE 1=1"
@@ -181,21 +193,24 @@ def stats() -> dict[str, Any]:
     settings = get_settings()
     conn = get_conn()
     try:
+        # Counted over the same working set the inbox lists, so the sidebar numbers
+        # always add up to what the user can actually see.
+        recent = f"(SELECT * FROM messages ORDER BY ts DESC LIMIT {DEFAULT_LIMIT})"
         prio_counts = {
             r["priority"]: r["n"]
             for r in conn.execute(
-                "SELECT priority, COUNT(*) n FROM messages WHERE priority IS NOT NULL GROUP BY priority"
+                f"SELECT priority, COUNT(*) n FROM {recent} WHERE priority IS NOT NULL GROUP BY priority"
             )
         }
         cat_counts = {
             r["category"]: r["n"]
             for r in conn.execute(
-                "SELECT category, COUNT(*) n FROM messages WHERE category IS NOT NULL GROUP BY category"
+                f"SELECT category, COUNT(*) n FROM {recent} WHERE category IS NOT NULL GROUP BY category"
             )
         }
-        total = conn.execute("SELECT COUNT(*) n FROM messages").fetchone()["n"]
+        total = conn.execute(f"SELECT COUNT(*) n FROM {recent}").fetchone()["n"]
         unprocessed = conn.execute(
-            "SELECT COUNT(*) n FROM messages WHERE processed_at IS NULL"
+            f"SELECT COUNT(*) n FROM {recent} WHERE processed_at IS NULL"
         ).fetchone()["n"]
         sync_rows = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM sync_state")}
     finally:
@@ -321,6 +336,114 @@ def decide_action(action_id: int, approve: bool) -> dict[str, Any]:
         return {"id": action_id, "status": status}
     finally:
         conn.close()
+
+
+# --- long-running jobs: sync from Gmail, enrich with the local model -----------
+class SyncRequest(BaseModel):
+    full: bool = False
+    max_messages: int | None = 50
+    # Enriching straight after syncing is what the Sync button means to a user;
+    # new mail with no TL;DR would otherwise appear as blank rows.
+    process: bool = True
+
+
+class ProcessRequest(BaseModel):
+    all: bool = False
+    limit: int | None = None
+
+
+def _run_process(*, all_: bool, limit: int | None) -> None:
+    """Enrich messages, reporting progress. Mirrors ``pipelines.run.main``'s loop.
+
+    The loop lives here rather than calling ``main()`` because ``main`` parses argv and
+    prints to stdout; the per-message work itself is the shared ``process_message``.
+    """
+    conn = get_conn()
+    try:
+        init_db(conn)
+        rows = _select_messages(conn, all_=all_, limit=limit)
+        jobs.progress(phase="enriching", done=0, total=len(rows))
+        for i, row in enumerate(rows, 1):
+            process_message(conn, row)
+            conn.commit()  # persist each, so a crash never loses completed work
+            jobs.progress(done=i)
+    finally:
+        conn.close()
+
+
+@app.post("/api/sync")
+def start_sync(req: SyncRequest) -> dict[str, Any]:
+    """Fetch new mail from Gmail, then (by default) enrich whatever arrived."""
+
+    def work() -> None:
+        conn = get_conn()
+        try:
+            init_db(conn)
+            jobs.progress(phase="contacting Gmail")
+            provider = GmailProvider()
+            sync(provider, conn, full=req.full, max_messages=req.max_messages)
+        finally:
+            conn.close()
+        if req.process:
+            _run_process(all_=False, limit=None)
+
+    if not jobs.start("sync", work):
+        raise HTTPException(status_code=409, detail="a job is already running")
+    return jobs.status()
+
+
+@app.post("/api/process")
+def start_process(req: ProcessRequest) -> dict[str, Any]:
+    """Run the Tier 1 pipelines over stored messages. No network, no mailbox writes."""
+    if not jobs.start("process", lambda: _run_process(all_=req.all, limit=req.limit)):
+        raise HTTPException(status_code=409, detail="a job is already running")
+    return jobs.status()
+
+
+@app.get("/api/job")
+def job_status() -> dict[str, Any]:
+    """Poll target for the UI's progress indicator."""
+    return jobs.status()
+
+
+# --- semantic search / Q&A (Phase 4) ----------------------------------------
+class IndexRequest(BaseModel):
+    rebuild: bool = False
+    limit: int | None = DEFAULT_LIMIT
+
+
+class AskRequest(BaseModel):
+    question: str
+    k: int | None = None
+
+
+@app.post("/api/index")
+def start_index(req: IndexRequest) -> dict[str, Any]:
+    """Embed messages into the vector store. Local-only; no mailbox writes."""
+
+    def work() -> None:
+        jobs.progress(phase="embedding")
+        build_index(
+            rebuild=req.rebuild,
+            limit=req.limit,
+            progress=lambda done, total: jobs.progress(done=done, total=total),
+        )
+
+    if not jobs.start("index", work):
+        raise HTTPException(status_code=409, detail="a job is already running")
+    return jobs.status()
+
+
+@app.post("/api/ask")
+def ask_question(req: AskRequest) -> dict[str, Any]:
+    """Answer a question from indexed mail, returning the sources it drew on.
+
+    Synchronous on purpose: unlike sync/enrichment this is one call the user is actively
+    waiting on, and it returns in seconds rather than minutes.
+    """
+    if not req.question.strip():
+        raise HTTPException(status_code=422, detail="question is required")
+    return ask(req.question, k=req.k)
 
 
 @app.get("/api/health")
