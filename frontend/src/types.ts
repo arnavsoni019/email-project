@@ -31,4 +31,6 @@ export interface SharedProps {
   clearFilter: () => void;
   back: () => void;
   reloadSettings: () => Promise<void>;
+  /** Re-fetch this message with remote images allowed (per-message, never sticky). */
+  loadImages: (id: string) => void;
 }

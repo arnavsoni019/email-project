@@ -2,6 +2,7 @@
  *  "full" for action/fyi, and a compact "quiet" row for ignore). */
 
 import { memo, useCallback, useState, type CSSProperties } from "react";
+import { HtmlBody } from "../HtmlBody";
 import { Icon } from "../Sprite";
 import type { Message } from "../api";
 import type { SharedProps } from "../types";
@@ -167,6 +168,10 @@ export function Inbox(p: SharedProps) {
   } = p;
   const [correcting, setCorrecting] = useState(false);
   const [showEarlier, setShowEarlier] = useState(false);
+  // Held as an id rather than a boolean so selecting another message collapses back to
+  // the summary automatically — no effect needed, and no stale "expanded" flag.
+  const [originalFor, setOriginalFor] = useState<string | null>(null);
+  const showOriginal = !!sel && originalFor === sel.id;
 
   // Stable identity so memoised rows don't re-render on every parent render.
   const onLabel = useCallback(
@@ -401,9 +406,50 @@ export function Inbox(p: SharedProps) {
                     </div>
                   )}
 
-                  {/* overflowWrap keeps long tracking URLs from forcing a horizontal scrollbar */}
-                  <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid var(--rule)", fontSize: "13.5px", lineHeight: 1.75, color: "var(--fg2)", whiteSpace: "pre-line", textWrap: "pretty", maxWidth: "62ch", overflowWrap: "anywhere", wordBreak: "break-word" }}>
-                    {sel.body}
+                  {/* Reading is summary-first: the point of the product is not to
+                      reproduce the sender's poster, it is to say what matters. The
+                      faithful render stays one click away for when it isn't enough. */}
+                  <div style={{ marginTop: "20px", paddingTop: "18px", borderTop: "1px solid var(--rule)" }}>
+                    {showOriginal && sel.blockedImages > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: "9px", padding: "9px 13px", marginBottom: "12px", borderRadius: "13px", background: "var(--warn-w)", border: "1px solid var(--warn-b)", fontSize: "12px", color: "var(--warn-fg)" }}>
+                        <span>
+                          {sel.blockedImages} remote image{sel.blockedImages === 1 ? "" : "s"} blocked —
+                          loading them tells the sender you opened this.
+                        </span>
+                        <button
+                          onClick={() => p.loadImages(sel.id)}
+                          style={{ marginLeft: "auto", flex: "none", padding: "4px 11px", borderRadius: "10px", border: "1px solid var(--warn-b)", background: "transparent", color: "var(--warn-t)", fontSize: "11.5px", fontWeight: 600, cursor: "pointer" }}
+                        >
+                          Load images
+                        </button>
+                      </div>
+                    )}
+
+                    {showOriginal && sel.html ? (
+                      <HtmlBody html={sel.html} imagesLoaded={sel.imagesLoaded} />
+                    ) : (
+                      // overflowWrap keeps long URLs from forcing a horizontal scrollbar.
+                      <div style={{ fontSize: "13.5px", lineHeight: 1.75, color: "var(--fg2)", whiteSpace: "pre-line", textWrap: "pretty", maxWidth: "62ch", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                        {sel.body}
+                      </div>
+                    )}
+
+                    {sel.html && (
+                      <button
+                        onClick={() => setOriginalFor(showOriginal ? null : sel.id)}
+                        style={{ display: "flex", alignItems: "center", gap: "7px", marginTop: "16px", padding: "7px 13px", borderRadius: "13px", border: "1px solid var(--s5)", background: "var(--s3)", color: "var(--fg3)", fontSize: "12px", fontWeight: 600, cursor: "pointer", transition: `background-color .16s ${EASE}` }}
+                      >
+                        <span style={{ display: "grid", placeItems: "center", color: "var(--fg5)", transform: showOriginal ? "rotate(180deg)" : "none", transition: `transform .22s ${EASE}` }}>
+                          <Icon id="ap-chev-d" size={13} />
+                        </span>
+                        {showOriginal ? "Hide original" : "Show original email"}
+                        {!showOriginal && sel.blockedImages > 0 && (
+                          <span style={{ fontSize: "11px", fontWeight: 500, color: "var(--fg5)" }}>
+                            · {sel.blockedImages} images
+                          </span>
+                        )}
+                      </button>
+                    )}
                   </div>
                   <div style={{ height: "16px" }} />
                 </div>

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from ..config import get_settings
 from ..db import get_conn, init_db
+from ..htmlmail import sanitize
 from ..pipelines.run import _select_messages, process_message
 from ..providers.email.gmail import GmailProvider
 from ..rag.index import build_index
@@ -149,8 +150,15 @@ def list_messages(
 
 
 @app.get("/api/messages/{message_id}")
-def get_message(message_id: str) -> dict[str, Any]:
-    """Full message, plus the earlier messages in its thread."""
+def get_message(message_id: str, images: bool = False) -> dict[str, Any]:
+    """Full message, plus the earlier messages in its thread.
+
+    Args:
+        images: load remote images in the HTML body. Off by default — remote images in
+            marketing mail are tracking pixels that report the open back to the sender.
+            The render frame runs no JavaScript, so this cannot be a client-side toggle;
+            the UI re-requests with images=true instead.
+    """
     conn = get_conn()
     try:
         row = conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
@@ -163,6 +171,9 @@ def get_message(message_id: str) -> dict[str, Any]:
     finally:
         conn.close()
 
+    raw_html = row["body_html"] if "body_html" in row.keys() else ""
+    safe_html, blocked_images = sanitize(raw_html or "", allow_remote_images=images)
+
     data = _row_to_summary(row)
     data.update(
         {
@@ -170,6 +181,11 @@ def get_message(message_id: str) -> dict[str, Any]:
             # "show original" toggle has something to fall back to.
             "body": clean_body(row["body_text"] or ""),
             "body_raw_len": len(row["body_text"] or ""),
+            # The email as its sender designed it, stripped of anything executable.
+            # Empty for genuinely plain-text mail, which the UI falls back to.
+            "html": safe_html,
+            "blockedImages": blocked_images,
+            "imagesLoaded": images,
             "to": json.loads(row["to_addrs"] or "[]"),
             "cc": json.loads(row["cc_addrs"] or "[]"),
             "n": len(earlier_rows) + 1,

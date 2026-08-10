@@ -26,6 +26,11 @@ export interface Message {
 
 export interface MessageDetail extends Message {
   body: string;
+  /** Sanitised original HTML; empty for genuinely plain-text mail. */
+  html: string;
+  /** Remote images replaced with blank pixels (tracking-pixel defence). */
+  blockedImages: number;
+  imagesLoaded: boolean;
   to: string[];
   cc: string[];
   n: number;
@@ -113,7 +118,8 @@ export const api = {
     qs.set("limit", String(params.limit ?? INBOX_LIMIT));
     return get<{ messages: Message[] }>(`/api/messages?${qs}`).then((d) => d.messages);
   },
-  message: (id: string) => get<MessageDetail>(`/api/messages/${id}`),
+  message: (id: string, images = false) =>
+    get<MessageDetail>(`/api/messages/${id}${images ? "?images=true" : ""}`),
   stats: () => get<Stats>("/api/stats"),
   settings: () => get<AppSettings>("/api/settings"),
   actions: () => get<{ actions: ProposedAction[] }>("/api/actions").then((d) => d.actions),

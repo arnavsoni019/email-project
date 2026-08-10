@@ -175,6 +175,7 @@ class GmailProvider(EmailProvider):
             subject=headers.get("subject", ""),
             snippet=html.unescape(raw.get("snippet", "")),
             body_text=_extract_body(payload),
+            body_html=_extract_html(payload),
             ts=int(raw.get("internalDate", "0")) // 1000,  # ms -> s
             label_ids=label_ids,
             is_unread="UNREAD" in label_ids,
@@ -293,6 +294,30 @@ def _extract_body(payload: dict) -> str:
 
     if mime == "text/html" and body_data:
         return _strip_html(_decode(body_data))
+    return ""
+
+
+def _extract_html(payload: dict) -> str:
+    """Walk the MIME tree and return the original ``text/html`` part, if any.
+
+    This is the version Gmail shows: the real email, with layout, images and styling.
+    ``_extract_body`` above deliberately flattens it to text for the model and for
+    search; this keeps the original so the reader can render it faithfully.
+
+    Returned RAW. Sanitising is a read-time concern (see ``mailorg.htmlmail``) so the
+    rules can tighten later without re-syncing.
+    """
+    if payload.get("mimeType") == "text/html":
+        data = payload.get("body", {}).get("data")
+        if data:
+            return _decode(data)
+
+    for part in payload.get("parts") or []:
+        # multipart/alternative lists text/plain first and text/html second, so recurse
+        # over every branch rather than stopping at the first non-empty one.
+        html = _extract_html(part)
+        if html:
+            return html
     return ""
 
 

@@ -25,6 +25,11 @@ dependencies = [
     "langgraph>=1.0",            # agent loop + human-in-the-loop (propose->approve)
     "httpx>=0.27",               # direct Ollama health/version checks
 
+    # Rendering sender HTML safely (Phase 3.5) — Rust "ammonia" bindings. Parses the
+    # markup into a tree and rebuilds it from an allowlist, which regex stripping
+    # cannot do reliably against deliberately malformed email.
+    "nh3>=0.2",
+
     # Config + structured outputs
     "pydantic>=2.7",
     "pydantic-settings>=2.3",    # loads typed settings from .env

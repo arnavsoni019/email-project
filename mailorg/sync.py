@@ -26,8 +26,8 @@ from .providers.email.gmail import GmailProvider
 _UPSERT_MESSAGE = """
 INSERT INTO messages
     (id, thread_id, from_addr, from_name, to_addrs, cc_addrs, subject, snippet, body_text,
-     ts, label_ids, is_unread, size_estimate)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     body_html, ts, label_ids, is_unread, size_estimate)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     thread_id     = excluded.thread_id,
     from_addr     = excluded.from_addr,
@@ -37,6 +37,7 @@ ON CONFLICT(id) DO UPDATE SET
     subject       = excluded.subject,
     snippet       = excluded.snippet,
     body_text     = excluded.body_text,
+    body_html     = excluded.body_html,
     ts            = excluded.ts,
     label_ids     = excluded.label_ids,
     is_unread     = excluded.is_unread,
@@ -88,6 +89,7 @@ def upsert_message(conn: sqlite3.Connection, msg: EmailMessage) -> None:
             msg.subject,
             msg.snippet,
             msg.body_text,
+            msg.body_html,
             msg.ts,
             json.dumps(msg.label_ids),
             1 if msg.is_unread else 0,

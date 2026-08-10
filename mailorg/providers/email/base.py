@@ -36,6 +36,10 @@ class EmailMessage:
     label_ids: list[str] = field(default_factory=list)
     is_unread: bool = False
     size_estimate: int = 0       # approximate size in bytes
+    # Original text/html part, stored unsanitised — cleaning is a read-time concern
+    # (mailorg.htmlmail) so the rules can tighten without re-syncing. Empty for
+    # genuinely plain-text mail.
+    body_html: str = ""
 
 
 @dataclass

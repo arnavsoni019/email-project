@@ -255,6 +255,16 @@ export default function App() {
     setTimer("theme", () => setTheming(undefined), 260);
   }, []);
 
+  // Re-fetch one message with remote images permitted. The cached copy has them
+  // blocked, so the cache is refreshed rather than read. Deliberately per-message and
+  // not persisted: consenting to one sender's tracking pixels is not consent for all.
+  const loadImages = useCallback((id: string) => {
+    api.message(id, true).then((d) => {
+      detailCache.current.set(d.id, d);
+      if (selIdRef.current === d.id) setDetail(d);
+    }).catch(() => undefined);
+  }, []);
+
   // Sync and enrichment run as a background job on the server (minutes, not
   // milliseconds), so this kicks it off and then polls /api/job for progress.
   const doSync = useCallback(async () => {
@@ -347,6 +357,7 @@ export default function App() {
     clearFilter: () => { setPrioFilter(null); setCatFilter(null); setQ(""); },
     back: () => { selIdRef.current = null; setSelId(null); },
     reloadSettings: () => api.settings().then(setSettings).then(() => undefined).catch(() => undefined),
+    loadImages,
   };
 
   return (

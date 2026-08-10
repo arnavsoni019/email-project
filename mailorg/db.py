@@ -105,6 +105,9 @@ def get_conn(db_path: str | Path | None = None) -> sqlite3.Connection:
 # add these to a database that already exists, so apply them explicitly.
 _MIGRATIONS: list[tuple[str, str, str]] = [
     ("messages", "from_name", "ALTER TABLE messages ADD COLUMN from_name TEXT"),
+    # The original text/html part, stored raw. Sanitising happens at read time so the
+    # rules can tighten later without re-syncing every message.
+    ("messages", "body_html", "ALTER TABLE messages ADD COLUMN body_html TEXT"),
 ]
 
 
