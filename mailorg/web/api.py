@@ -23,6 +23,8 @@ from pydantic import BaseModel
 from ..config import get_settings
 from ..db import get_conn, init_db
 from ..htmlmail import sanitize
+from ..privacy import effective_cloud, set_cloud_preference
+from ..providers.llm.cloud import cloud_is_configured
 from ..pipelines.run import _select_messages, process_message
 from ..providers.email.gmail import GmailProvider
 from ..rag.index import build_index
@@ -261,15 +263,37 @@ def read_settings() -> dict[str, Any]:
         ollama_ok = httpx.get(f"{s.ollama_host}/api/version", timeout=2).status_code == 200
     except Exception:
         ollama_ok = False
+
+    enabled, tasks, has_ceiling = effective_cloud(s)
     return {
-        "cloud_enabled": s.cloud_enabled,
-        "cloud_allowed_tasks": sorted(s.cloud_allowed_tasks),
+        # Live values (the .env ceiling narrowed by the UI switch), not raw .env.
+        "cloud_enabled": enabled,
+        "cloud_allowed_tasks": sorted(tasks),
+        # What the switch is *permitted* to turn on, so the UI can grey out the rest
+        # and explain an inert toggle rather than dropping clicks silently.
+        "cloud_allowed_ceiling": sorted(s.cloud_allowed_tasks),
+        "cloud_configurable": has_ceiling,
+        # Enough to show where text would go. The key itself is never returned.
+        "cloud_model": s.cloud_model,
+        "cloud_base_url": s.cloud_base_url,
+        "cloud_key_present": cloud_is_configured(),
         "model_light": s.model_light,
         "model_heavy": s.model_heavy,
         "ollama_host": s.ollama_host,
         "ollama_connected": ollama_ok,
         "categories": s.categories,
     }
+
+
+@app.put("/api/settings")
+def update_settings(patch: SettingsPatch) -> dict[str, Any]:
+    """Flip the cloud switch from the UI.
+
+    Cannot grant more than ``.env`` permits: ``set_cloud_preference`` intersects with
+    ``cloud_allowed_tasks`` on write, and ``effective_cloud`` intersects again on read.
+    """
+    set_cloud_preference(enabled=patch.cloud_enabled, tasks=patch.cloud_allowed_tasks)
+    return read_settings()
 
 
 # --- actions (propose -> approve queue) -------------------------------------

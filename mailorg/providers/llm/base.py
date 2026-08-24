@@ -14,6 +14,7 @@ from __future__ import annotations
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from ...config import Settings, get_settings
+from ...privacy import may_use_cloud
 from .ollama import get_heavy_llm, get_light_llm
 
 
@@ -27,12 +28,13 @@ def get_llm(task: str, *, heavy: bool = False, settings: Settings | None = None)
     """
     settings = settings or get_settings()
 
-    if settings.may_use_cloud(task):
-        # Phase 6 will wire langchain-anthropic here, behind this exact gate.
-        raise NotImplementedError(
-            f"Task {task!r} is cloud-eligible, but the cloud backend is not wired until "
-            "Phase 6. Disable it via CLOUD_ENABLED / CLOUD_ALLOWED_TASKS to run locally."
-        )
+    # The gate combines .env with the UI switch; .env is the ceiling (see mailorg.privacy).
+    if may_use_cloud(task, settings):
+        # Imported lazily so the cloud client is never even constructed — and its
+        # dependency never required — on a purely local install.
+        from .cloud import get_cloud_llm
+
+        return get_cloud_llm()
 
     # Default, private path: 100% local.
     return get_heavy_llm() if heavy else get_light_llm()

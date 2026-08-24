@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS sync_state (
     value  TEXT
 );
 
+-- User preferences set from the UI, as opposed to sync bookkeeping above. Currently
+-- just the cloud switch; see mailorg.privacy, where .env remains the hard ceiling.
+CREATE TABLE IF NOT EXISTS app_config (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
+);
+
 -- Category taxonomy (seeded from Settings.categories; user-editable later).
 CREATE TABLE IF NOT EXISTS categories (
     name         TEXT PRIMARY KEY,

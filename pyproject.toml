@@ -46,9 +46,12 @@ rag = [
     "chromadb>=0.5",
     "langchain-chroma>=0.1",
 ]
-# Phase 6 — opt-in cloud LLM (Claude). Install with:  pip install -e ".[cloud]"
+# Phase 6 — opt-in cloud LLM. Install with:  pip install -e ".[cloud]"
+# OpenRouter, DeepSeek and most hosted providers expose an OpenAI-compatible API, so a
+# single client covers all of them; which one is used is a base_url + model string in
+# .env, not a code change.
 cloud = [
-    "langchain-anthropic>=0.3",
+    "langchain-openai>=1.0",
 ]
 # Developer tooling. Install with:  pip install -e ".[dev]"
 dev = [

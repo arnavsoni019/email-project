@@ -46,8 +46,16 @@ export interface Stats {
 }
 
 export interface AppSettings {
+  /** Live value: the .env ceiling narrowed by the UI switch. */
   cloud_enabled: boolean;
   cloud_allowed_tasks: string[];
+  /** What .env permits the switch to reach; empty means the switch is inert. */
+  cloud_allowed_ceiling: string[];
+  cloud_configurable: boolean;
+  cloud_model: string;
+  cloud_base_url: string;
+  /** Whether an API key is set. The key itself is never sent to the browser. */
+  cloud_key_present: boolean;
   model_light: string;
   model_heavy: string;
   ollama_host: string;
@@ -146,4 +154,13 @@ export const api = {
   startIndex: (body: { rebuild?: boolean; limit?: number | null } = {}) =>
     post<JobStatus>("/api/index", body),
   ask: (question: string, k?: number) => post<AskResult>("/api/ask", { question, k }),
+  saveSettings: (patch: { cloud_enabled?: boolean; cloud_allowed_tasks?: string[] }) =>
+    fetch(`${BASE}/api/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`${r.status} PUT /api/settings`);
+      return r.json() as Promise<AppSettings>;
+    }),
 };

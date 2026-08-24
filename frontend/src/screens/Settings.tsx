@@ -1,9 +1,12 @@
 /** Settings — privacy gate, models, categories, account.
  *
- *  The cloud gate is deliberately READ-ONLY here: it lives in .env / config.py and is
- *  enforced server-side by Settings.may_use_cloud(). A web page cannot flip it, which
- *  is the point — the privacy boundary is not reachable from the browser. */
+ *  The cloud switch is live, but it can only ever move WITHIN the ceiling set in .env
+ *  (CLOUD_ALLOWED_TASKS). The server intersects on both write and read, so a task the
+ *  machine's owner never permitted cannot be enabled from a browser — the boundary
+ *  stays server-side while the day-to-day choice sits where the user can reach it. */
 
+import { useState } from "react";
+import { api } from "../api";
 import { Icon } from "../Sprite";
 import type { SharedProps } from "../types";
 import { catColor, glass } from "../ui";
@@ -28,9 +31,30 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function Settings(p: SharedProps) {
-  const { settings, stats } = p;
+  const { settings, stats, reloadSettings } = p;
+  const [busy, setBusy] = useState(false);
   const cloudOn = !!settings?.cloud_enabled;
   const allowed = settings?.cloud_allowed_tasks ?? [];
+  // What .env permits the switch to reach. Empty = the switch is inert by design.
+  const ceiling = settings?.cloud_allowed_ceiling ?? [];
+  const configurable = !!settings?.cloud_configurable;
+  const keyPresent = !!settings?.cloud_key_present;
+
+  const save = async (patch: { cloud_enabled?: boolean; cloud_allowed_tasks?: string[] }) => {
+    setBusy(true);
+    try {
+      await api.saveSettings(patch);
+      await reloadSettings();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleTask = (id: string) => {
+    if (!ceiling.includes(id)) return; // outside the ceiling — server would reject anyway
+    const next = allowed.includes(id) ? allowed.filter((x) => x !== id) : [...allowed, id];
+    save({ cloud_allowed_tasks: next });
+  };
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
@@ -49,10 +73,24 @@ export function Settings(p: SharedProps) {
             <span style={{ fontSize: "13px", fontWeight: 600 }}>
               {cloudOn ? "Cloud enabled" : "Off — everything runs on this machine"}
             </span>
-            <span style={{ marginLeft: "auto", fontSize: "10.5px", fontWeight: 700, letterSpacing: ".09em", textTransform: "uppercase", color: cloudOn ? "var(--warn-t)" : "var(--ok-t)" }}>
-              {cloudOn ? "cloud" : "local"}
-            </span>
+            <button
+              onClick={() => save({ cloud_enabled: !cloudOn })}
+              disabled={!configurable || busy}
+              title={configurable ? undefined : "Set CLOUD_ALLOWED_TASKS in .env to enable this switch"}
+              aria-pressed={cloudOn}
+              style={{ marginLeft: "auto", flex: "none", width: "40px", height: "22px", padding: "2px", borderRadius: "99px", border: `1px solid ${cloudOn ? "var(--warn-b)" : "var(--edge)"}`, background: cloudOn ? "var(--warn)" : "var(--s5)", cursor: configurable && !busy ? "pointer" : "not-allowed", opacity: configurable ? 1 : 0.45, transition: "background-color .18s ease" }}
+            >
+              <span style={{ display: "block", width: "16px", height: "16px", borderRadius: "99px", background: "var(--s1)", transform: cloudOn ? "translateX(18px)" : "translateX(0)", transition: "transform .18s cubic-bezier(.32,.72,0,1)" }} />
+            </button>
           </div>
+
+          {cloudOn && !keyPresent && (
+            <div style={{ marginTop: "10px", padding: "9px 12px", borderRadius: "12px", background: "var(--warn-w)", border: "1px solid var(--warn-b)", fontSize: "11.5px", color: "var(--warn-fg)", lineHeight: 1.55 }}>
+              No API key configured — cloud tasks will fail rather than silently fall back
+              to local, so you always know where text went. Set <code>CLOUD_API_KEY</code> in{" "}
+              <code>.env</code>.
+            </div>
+          )}
 
           <p style={{ margin: "12px 0 0", fontSize: "12px", lineHeight: 1.6, color: "var(--fg4)" }}>
             {cloudOn
@@ -63,8 +101,17 @@ export function Settings(p: SharedProps) {
           <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "2px" }}>
             {TASKS.map((t) => {
               const on = cloudOn && allowed.includes(t.id);
+              // Outside the .env ceiling: shown, but permanently local so the user can
+              // see the full surface rather than wondering what is missing.
+              const reachable = ceiling.includes(t.id);
               return (
-                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", padding: "9px 11px", borderRadius: "13px" }}>
+                <button
+                  key={t.id}
+                  onClick={() => toggleTask(t.id)}
+                  disabled={!reachable || !cloudOn || busy}
+                  title={reachable ? undefined : `Not permitted by CLOUD_ALLOWED_TASKS in .env`}
+                  style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", padding: "9px 11px", borderRadius: "13px", border: "none", background: "transparent", textAlign: "left", cursor: reachable && cloudOn && !busy ? "pointer" : "not-allowed", opacity: reachable ? 1 : 0.5 }}
+                >
                   <span style={{ width: "17px", height: "17px", flex: "none", display: "grid", placeItems: "center", border: `1px solid ${on ? "var(--warn)" : "var(--edge)"}`, borderRadius: "6px", background: on ? "var(--warn)" : "var(--s4)", color: "var(--s9)" }}>
                     {on && <Icon id="ap-check" size={11} />}
                   </span>
@@ -75,7 +122,7 @@ export function Settings(p: SharedProps) {
                   <span style={{ marginLeft: "auto", fontSize: "10.5px", fontWeight: 700, letterSpacing: ".09em", textTransform: "uppercase", color: on ? "var(--warn-t)" : "var(--ok-t)" }}>
                     {on ? "cloud" : "local"}
                   </span>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -83,11 +130,21 @@ export function Settings(p: SharedProps) {
           <div style={{ marginTop: "12px", padding: "11px 13px", borderRadius: "13px", background: "var(--s2)", border: "1px solid var(--s4)", display: "flex", gap: "9px" }}>
             <span style={{ color: "var(--fg5)", flex: "none", marginTop: "1px" }}><Icon id="ap-shield" size={13} /></span>
             <span style={{ fontSize: "11.5px", color: "var(--fg4)", lineHeight: 1.6 }}>
-              This gate is read-only from the browser by design. It is set in{" "}
+              These switches can only move <em>within</em> the ceiling set in{" "}
               <code style={{ fontSize: "11px", padding: "1px 5px", borderRadius: "6px", background: "var(--chip)" }}>.env</code>{" "}
-              (<code style={{ fontSize: "11px", padding: "1px 5px", borderRadius: "6px", background: "var(--chip)" }}>CLOUD_ENABLED</code>,{" "}
-              <code style={{ fontSize: "11px", padding: "1px 5px", borderRadius: "6px", background: "var(--chip)" }}>CLOUD_ALLOWED_TASKS</code>)
-              and enforced server-side, so a web page can never widen it.
+              (<code style={{ fontSize: "11px", padding: "1px 5px", borderRadius: "6px", background: "var(--chip)" }}>CLOUD_ALLOWED_TASKS</code>).
+              The server intersects with it on every write and every read, so a task you
+              did not permit there can never be enabled from a browser.
+              {ceiling.length === 0
+                ? " Nothing is permitted yet, so these controls are inert."
+                : ` Permitted: ${ceiling.join(", ")}.`}
+              {settings?.cloud_model && (
+                <>
+                  {" "}Cloud requests would go to{" "}
+                  <code style={{ fontSize: "11px", padding: "1px 5px", borderRadius: "6px", background: "var(--chip)" }}>{settings.cloud_model}</code>{" "}
+                  via {new URL(settings.cloud_base_url ?? "https://openrouter.ai").host}.
+                </>
+              )}
             </span>
           </div>
         </Section>
