@@ -59,10 +59,18 @@ class Settings(BaseSettings):
     # allowlist below. Default False = 100% local.
     cloud_enabled: bool = False
     # Per-task allowlist. Even with cloud_enabled=True, only these task names may use
-    # the cloud (e.g. {"draft", "qa"}). Empty = nothing is cloud-eligible.
+    # the cloud (e.g. {"draft", "ask"}). Empty = nothing is cloud-eligible.
     cloud_allowed_tasks: set[str] = Field(default_factory=set)
-    # Only read when a cloud task actually runs (Phase 6).
-    anthropic_api_key: str | None = None
+
+    # OpenRouter, DeepSeek, Together and most hosted providers speak the OpenAI wire
+    # format, so one client covers them all and switching provider is an .env edit.
+    cloud_base_url: str = "https://openrouter.ai/api/v1"
+    # Namespaced on OpenRouter ("deepseek/deepseek-chat"); a bare id direct from a vendor.
+    cloud_model: str = "deepseek/deepseek-chat"
+    # Read only when a cloud task actually runs. Never returned by the API.
+    cloud_api_key: str | None = None
+    # Sent by OpenRouter for attribution in its dashboard; harmless elsewhere.
+    cloud_app_title: str = "mailorg"
 
     # ---- Gmail (OAuth) ------------------------------------------------------
     # Path to the OAuth "installed app" client secrets downloaded from Google Cloud.
@@ -74,6 +82,20 @@ class Settings(BaseSettings):
     gmail_scopes: list[str] = Field(
         default_factory=lambda: ["https://www.googleapis.com/auth/gmail.readonly"]
     )
+
+    # ---- Agent actions (Phase 5) --------------------------------------------
+    # When True (the default) the executor computes exactly what it *would* send to
+    # Gmail and records it, without calling the API. Going live is a deliberate act:
+    # it also requires widening gmail_scopes to gmail.modify and re-authenticating.
+    actions_dry_run: bool = True
+    # Ceiling on how many approved actions one executor run may apply. A bug that
+    # proposes badly should be able to touch a handful of messages, not the mailbox.
+    actions_batch_limit: int = 25
+    # Whether the proposer may suggest draft replies. Off: the rule that produced them
+    # ("priority is action") conflates needing attention with needing a written reply,
+    # and every draft it generated targeted an unattended mailbox. Turn back on once a
+    # model can be asked directly whether a reply is wanted (Phase 6).
+    propose_drafts: bool = False
 
     # ---- Category taxonomy --------------------------------------------------
     # Starting set from the plan; adjustable. Used by the categorise pipeline (Phase 2).
