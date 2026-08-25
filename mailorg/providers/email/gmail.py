@@ -11,7 +11,11 @@ import base64
 import html
 import re
 from collections.abc import Iterator
+# Aliased: .base already exports an EmailMessage dataclass, which is a different thing
+# entirely — ours is a stored row, this one builds RFC-822 bytes for a draft.
+from email.message import EmailMessage as EmailMessageMIME
 from email.utils import getaddresses
+from typing import Any
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -21,6 +25,12 @@ from googleapiclient.errors import HttpError
 
 from ...config import Settings, get_settings
 from .base import EmailMessage, EmailProvider, HistoryChanges
+
+# The narrowest scope Gmail offers that can add or remove labels on a message — and
+# therefore archive. Note it is broader than that name suggests: it also permits
+# sending. Google has no label-only write scope, so the guarantee that mailorg never
+# sends is a property of this code (there is no send call anywhere), not of the grant.
+MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
 
 # <style>/<script>/<head> must be dropped WITH their contents — stripping only the tags
 # leaves raw CSS/JS in the body text, which then pollutes the UI and the LLM prompt.
@@ -183,6 +193,91 @@ class GmailProvider(EmailProvider):
         )
 
     # -- Incremental --------------------------------------------------------
+    # -- Writes (Phase 5) ---------------------------------------------------
+    # The ONLY methods in this file that change the mailbox. Each needs the
+    # gmail.modify scope, which the executor checks for before calling any of them, and
+    # each is reversible: label changes can be undone, and drafts deleted. There is no
+    # send() here and there never should be — the agent proposes, the user disposes.
+    def _require_write_scope(self) -> None:
+        """Fail before the API call, with a fixable message rather than a 403."""
+        if MODIFY_SCOPE not in self.settings.gmail_scopes:
+            raise PermissionError(
+                f"This operation needs {MODIFY_SCOPE!r}. Add it to GMAIL_SCOPES in .env, "
+                "delete data/token.json, and re-run a sync to re-consent."
+            )
+
+    def modify_message(
+        self,
+        message_id: str,
+        *,
+        add_label_ids: list[str] | None = None,
+        remove_label_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Add and/or remove labels on one message.
+
+        Archiving is simply removing ``INBOX`` — Gmail has no separate archive verb,
+        which is also why it is trivially reversible: add the label back.
+        """
+        self._require_write_scope()
+        body = {
+            "addLabelIds": add_label_ids or [],
+            "removeLabelIds": remove_label_ids or [],
+        }
+        return (
+            self.service.users()
+            .messages()
+            .modify(userId="me", id=message_id, body=body)
+            .execute()
+        )
+
+    def ensure_label(self, name: str) -> str:
+        """Return the id of the label called ``name``, creating it if absent.
+
+        Gmail's API takes label *ids*, not names, and creating a label that already
+        exists is a 409. Looking it up first makes this idempotent, so re-running the
+        executor never duplicates labels.
+        """
+        self._require_write_scope()
+        for label_id, label_name in self.list_labels().items():
+            if label_name == name:
+                return label_id
+        created = (
+            self.service.users()
+            .labels()
+            .create(
+                userId="me",
+                body={
+                    "name": name,
+                    "labelListVisibility": "labelShow",
+                    "messageListVisibility": "show",
+                },
+            )
+            .execute()
+        )
+        return created["id"]
+
+    def create_draft(self, *, thread_id: str | None, to: str, body: str,
+                     subject: str | None = None) -> str:
+        """Save a reply as a Gmail draft. Never sends it.
+
+        Attaching ``threadId`` keeps the draft in the original conversation rather than
+        starting a new one. Returns the draft id, which is also what deletes it again.
+        """
+        self._require_write_scope()
+        message = EmailMessageMIME()
+        message["To"] = to
+        if subject:
+            message["Subject"] = subject
+        message.set_content(body)
+
+        payload: dict[str, Any] = {
+            "message": {"raw": base64.urlsafe_b64encode(message.as_bytes()).decode()}
+        }
+        if thread_id:
+            payload["message"]["threadId"] = thread_id
+        created = self.service.users().drafts().create(userId="me", body=payload).execute()
+        return created["id"]
+
     def list_history(self, start_history_id: str) -> HistoryChanges:
         added: list[str] = []
         deleted: list[str] = []
