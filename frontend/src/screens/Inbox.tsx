@@ -3,6 +3,7 @@
 
 import { memo, useCallback, useState, type CSSProperties } from "react";
 import { HtmlBody } from "../HtmlBody";
+import { Resizer, usePaneWidth } from "../Resizer";
 import { Icon } from "../Sprite";
 import type { Message } from "../api";
 import type { SharedProps } from "../types";
@@ -172,6 +173,9 @@ export function Inbox(p: SharedProps) {
   // the summary automatically — no effect needed, and no stale "expanded" flag.
   const [originalFor, setOriginalFor] = useState<string | null>(null);
   const showOriginal = !!sel && originalFor === sel.id;
+  // 340px is the design's list width. The lower bound keeps a row's sender + time
+  // legible; the upper bound leaves the reader usable.
+  const { width: listW, set: setListW, reset: resetListW } = usePaneWidth("list", 340, 280, 620);
 
   // Stable identity so memoised rows don't re-render on every parent render.
   const onLabel = useCallback(
@@ -180,15 +184,17 @@ export function Inbox(p: SharedProps) {
     [propose],
   );
 
+  // Wide layout gives the list an explicit width so the divider can drive it; the
+  // reader takes whatever is left. Narrow layout still stacks one pane at a time.
   const listPanel = glass(
     narrow
       ? { flex: "1 1 auto", minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }
-      : { flex: "1 1 340px", maxWidth: "406px", minWidth: "304px", display: "flex", flexDirection: "column", overflow: "hidden" },
+      : { flex: "none", width: `${listW}px`, display: "flex", flexDirection: "column", overflow: "hidden" },
   );
   const readerPanel = glass(
     narrow
       ? { flex: "1 1 auto", minWidth: 0, overflow: "hidden" }
-      : { flex: "1 1 520px", minWidth: "440px", overflow: "hidden" },
+      : { flex: "1 1 auto", minWidth: 0, overflow: "hidden" },
   );
 
   const hasFilter = !!(prioFilter || catFilter);
@@ -203,8 +209,9 @@ export function Inbox(p: SharedProps) {
   const showList = !narrow || !sel;
   const showReader = !narrow || !!sel;
 
+  // gap:0 in the wide layout because the Resizer supplies the 10px spacing itself.
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", gap: "10px" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", gap: narrow ? "10px" : 0 }}>
       {showList && (
         <section style={listPanel}>
           <div style={{ flex: "none", display: "flex", alignItems: "center", gap: "8px", padding: "13px 16px 10px" }}>
@@ -280,6 +287,16 @@ export function Inbox(p: SharedProps) {
             )}
           </div>
         </section>
+      )}
+
+      {/* Only when both panes are on screen — there is nothing to divide otherwise. */}
+      {!narrow && showList && showReader && (
+        <Resizer
+          label="List width"
+          width={listW}
+          onResize={setListW}
+          onReset={resetListW}
+        />
       )}
 
       {showReader && (

@@ -3,6 +3,7 @@
  *  FastAPI backend. Style values are copied from the design; see ui.ts. */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Resizer, usePaneWidth } from "./Resizer";
 import { Icon, Sprite } from "./Sprite";
 import {
   api,
@@ -58,6 +59,10 @@ export default function App() {
   const [out, setOut] = useState(false);
   const [selOut, setSelOut] = useState(false);
   const [sidebar, setSidebar] = useState(true);
+  // 234px is the design's width; the bounds keep the nav labels readable at one end
+  // and stop the sidebar swallowing the list at the other.
+  const { width: sidebarW, set: setSidebarW, reset: resetSidebarW } = usePaneWidth("sidebar", 234, 180, 420);
+  const [draggingSidebar, setDraggingSidebar] = useState(false);
   const [prioFilter, setPrioFilter] = useState<string | null>(null);
   const [catFilter, setCatFilter] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -369,9 +374,19 @@ export default function App() {
       <div style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none", background: "var(--wash)" }} />
       <Sprite />
 
-      <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", gap: "10px", padding: "10px" }}>
+      {/* gap:0 because the Resizers supply the design's 10px inter-pane spacing */}
+      <div style={{ position: "relative", zIndex: 1, height: "100%", display: "flex", gap: narrow ? "10px" : 0, padding: "10px" }}>
         {/* ---------- sidebar ---------- */}
-        <aside style={glass({ width: sidebar ? "234px" : "62px", flex: "none", overflow: "hidden", transition: `width .24s ${EASE}` })}>
+        <aside
+          style={glass({
+            width: sidebar ? `${sidebarW}px` : "62px",
+            flex: "none",
+            overflow: "hidden",
+            // Animate the collapse toggle, but not the drag — a transition during a
+            // drag makes the pane lag the cursor and feel broken.
+            transition: draggingSidebar ? "none" : `width .24s ${EASE}`,
+          })}
+        >
           <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
             <div style={{ padding: "15px 15px 12px", display: "flex", alignItems: "center", gap: "9px" }}>
               <span style={{ width: "27px", height: "27px", display: "grid", placeItems: "center", borderRadius: "9px", background: ACC, color: "var(--acc-on)", fontSize: "13px", fontWeight: 700, letterSpacing: "-.03em" }}>m</span>
@@ -485,6 +500,20 @@ export default function App() {
             )}
           </div>
         </aside>
+
+        {/* Only offered when the sidebar is expanded; there is nothing to resize at
+            62px, and on narrow screens the panes stack instead. */}
+        {!narrow && sidebar && (
+          <Resizer
+            label="Sidebar width"
+            width={sidebarW}
+            onResize={setSidebarW}
+            onReset={resetSidebarW}
+            onActiveChange={setDraggingSidebar}
+          />
+        )}
+        {/* Collapsed: no handle, but the 10px the container no longer supplies. */}
+        {!narrow && !sidebar && <div style={{ flex: "none", width: "10px" }} />}
 
         {/* ---------- main ---------- */}
         <main style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "10px", minHeight: 0 }}>
