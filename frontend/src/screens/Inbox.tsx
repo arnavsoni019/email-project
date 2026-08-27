@@ -180,7 +180,7 @@ export function Inbox(p: SharedProps) {
   // Stable identity so memoised rows don't re-render on every parent render.
   const onLabel = useCallback(
     (e: Message) =>
-      propose("label", e.id, `Requested from the inbox list. Suggested label ${e.cat}/${e.sender}.`),
+      propose("label", e.id, `Requested from the inbox list. Suggested label ${e.cat}.`, { labelName: `mailorg/${e.cat}` }),
     [propose],
   );
 
@@ -480,7 +480,7 @@ export function Inbox(p: SharedProps) {
                   <Icon id="ap-reply" />Draft reply
                 </button>
                 <button
-                  onClick={() => propose("label", sel.id, `Requested from the reading pane. Suggested label ${sel.cat}/${sel.sender}.`)}
+                  onClick={() => propose("label", sel.id, `Requested from the reading pane. Suggested label ${sel.cat}.`, { labelName: `mailorg/${sel.cat}` })}
                   style={btn("ghost")}
                 >
                   <Icon id="ap-tag" style={{ opacity: 0.55 }} />Label

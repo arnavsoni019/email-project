@@ -22,7 +22,10 @@ export interface SharedProps {
   setHover: (id: string | null) => void;
   select: (id: string) => void;
   archive: (id: string) => void;
-  propose: (type: string, targetId: string, rationale: string) => Promise<void>;
+  /** `payload` carries the action's parameters, e.g. `{ labelName }` for a label. */
+  propose: (
+    type: string, targetId: string, rationale: string, payload?: Record<string, unknown>,
+  ) => Promise<void>;
   resolve: (id: number, ok: boolean) => Promise<void>;
   goScreen: (s: Screen) => void;
   flash: (text: string, actionLabel?: string, act?: () => void) => void;

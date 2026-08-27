@@ -238,8 +238,12 @@ export default function App() {
     }, 220);
   }, [flash]);
 
-  const propose = useCallback(async (type: string, targetId: string, rationale: string) => {
-    await api.propose({ type, target_id: targetId, rationale });
+  // `payload` carries the action's parameters (e.g. which label). Without it the
+  // executor has nothing to apply and has to guess from the message's category.
+  const propose = useCallback(async (
+    type: string, targetId: string, rationale: string, payload?: Record<string, unknown>,
+  ) => {
+    await api.propose({ type, target_id: targetId, rationale, payload });
     setProposals(await api.actions());
     flash(
       type === "draft" ? "Reply drafted — queued for approval" : "Proposed — queued for approval",

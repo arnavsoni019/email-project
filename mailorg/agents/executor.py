@@ -39,26 +39,51 @@ class WriteScopeMissing(RuntimeError):
     """Raised when a live run is attempted without Gmail write permission."""
 
 
-def _describe(action: sqlite3.Row, payload: dict[str, Any]) -> str:
+def _label_name(conn: sqlite3.Connection, action: sqlite3.Row, payload: dict[str, Any]) -> str | None:
+    """The label to apply, falling back to the message's category.
+
+    Proposals raised from the UI's "Label" button carry only a rationale — the browser
+    never sends a payload — so ``labelName`` is absent on those rows. Deriving it from
+    the stored category makes them applicable instead of failing with a KeyError at the
+    moment of writing to the mailbox, which is the worst possible time to discover it.
+    """
+    name = payload.get("labelName")
+    if name:
+        return str(name)
+    row = conn.execute(
+        "SELECT category FROM messages WHERE id = ?", (action["target_id"],)
+    ).fetchone()
+    category = (row["category"] or "").strip() if row else ""
+    return f"mailorg/{category}" if category else None
+
+
+def _describe(action: sqlite3.Row, payload: dict[str, Any], label: str | None = None) -> str:
     """The exact Gmail operation this action represents, in one readable line."""
     if action["type"] == "archive":
         return f"users.messages.modify(id={action['target_id']}, removeLabelIds=['INBOX'])"
     if action["type"] == "label":
-        return f"users.messages.modify(id={action['target_id']}, addLabelIds=['{payload.get('labelName')}'])"
+        return f"users.messages.modify(id={action['target_id']}, addLabelIds=['{label or payload.get('labelName')}'])"
     if action["type"] == "draft":
         n = len(payload.get("body") or "")
         return f"users.drafts.create(threadId={payload.get('threadId')}, to={payload.get('to')}, body={n} chars)"
     return f"unknown action type {action['type']!r}"
 
 
-def _apply_live(provider: Any, action: sqlite3.Row, payload: dict[str, Any]) -> dict[str, Any]:
+def _apply_live(
+    provider: Any, action: sqlite3.Row, payload: dict[str, Any], label: str | None = None
+) -> dict[str, Any]:
     """Perform the real Gmail call. Only reached with --live and the modify scope."""
     kind = action["type"]
     if kind == "archive":
         provider.modify_message(action["target_id"], remove_label_ids=["INBOX"])
         return {"removed": ["INBOX"], "undo": {"addLabelIds": ["INBOX"]}}
     if kind == "label":
-        name = payload["labelName"]
+        name = label or payload.get("labelName")
+        if not name:
+            raise ValueError(
+                "no label name on the proposal and the message has no category to "
+                "derive one from"
+            )
         label_id = provider.ensure_label(name)
         provider.modify_message(action["target_id"], add_label_ids=[label_id])
         return {"added": [name], "labelId": label_id, "undo": {"removeLabelIds": [label_id]}}
@@ -100,13 +125,14 @@ def run(*, live: bool = False, settings: Settings | None = None) -> dict[str, An
         planned, applied, failed = [], 0, 0
         for action in rows:
             payload = json.loads(action["payload"] or "{}")
-            description = _describe(action, payload)
+            label = _label_name(conn, action, payload) if action["type"] == "label" else None
+            description = _describe(action, payload, label)
             planned.append({"id": action["id"], "type": action["type"], "call": description})
 
             if dry_run:
                 continue
             try:
-                result = _apply_live(provider, action, payload)
+                result = _apply_live(provider, action, payload, label)
                 conn.execute(
                     "UPDATE actions SET status='applied', result=? WHERE id=?",
                     (json.dumps({"call": description, **result, "appliedTs": int(time.time())}), action["id"]),
