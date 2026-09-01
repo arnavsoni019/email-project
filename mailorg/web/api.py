@@ -20,9 +20,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from ..agents.proposer import _DRAFT_INSTRUCTION, _can_reply
 from ..config import get_settings
 from ..db import get_conn, init_db
 from ..htmlmail import sanitize
+from ..pipelines.common import format_email_for_llm
+from ..providers.llm.base import get_llm
 from ..privacy import effective_cloud, set_cloud_preference
 from ..providers.llm.cloud import cloud_is_configured
 from ..pipelines.run import _select_messages, process_message
@@ -333,18 +336,57 @@ def list_actions(status: str | None = None) -> dict[str, Any]:
     }
 
 
+def _build_draft_payload(conn: sqlite3.Connection, target_id: str) -> dict[str, Any]:
+    """Write the reply now, so the queue card shows text a human can actually judge.
+
+    Drafting at propose time rather than at execute time is the whole point of
+    propose->approve: approving a draft you have not read is not a review. It costs a
+    few seconds on the click, which is why the button reports a drafting state.
+    """
+    row = conn.execute(
+        "SELECT thread_id, from_addr, subject, body_text, snippet FROM messages WHERE id = ?",
+        (target_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+
+    to = (row["from_addr"] or "").strip()
+    if not _can_reply(to):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{to or 'this sender'} is an unattended mailbox — a reply would bounce.",
+        )
+
+    block = format_email_for_llm(
+        from_addr=row["from_addr"], subject=row["subject"],
+        body_text=row["body_text"], snippet=row["snippet"],
+    )
+    body = str(get_llm("draft", heavy=True).invoke(f"{_DRAFT_INSTRUCTION}\n\n{block}").content).strip()
+    if not body:
+        raise HTTPException(status_code=502, detail="the model returned an empty draft")
+
+    return {"threadId": row["thread_id"], "to": to, "body": body}
+
+
 @app.post("/api/actions")
 def create_action(action: ActionCreate) -> dict[str, Any]:
-    """Queue a proposed action. Never touches Gmail — approval happens in Phase 5."""
+    """Queue a proposed action. Never touches Gmail — the executor applies it later."""
     conn = get_conn()
     try:
+        payload = dict(action.payload or {})
+        # A draft with no body is the one proposal that cannot be reviewed and cannot be
+        # applied: create_draft() would happily produce a Gmail draft addressed to the
+        # literal string "None". Fill it in here instead of discovering it at write time.
+        if action.type == "draft" and not payload.get("body"):
+            payload = {**_build_draft_payload(conn, action.target_id), **payload}
+
         cur = conn.execute(
             "INSERT INTO actions (type, target_id, payload, rationale, created_ts) "
             "VALUES (?, ?, ?, ?, ?)",
             (
                 action.type,
                 action.target_id,
-                json.dumps(action.payload or {}),
+                json.dumps(payload),
                 action.rationale,
                 int(time.time()),
             ),

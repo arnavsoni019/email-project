@@ -16,7 +16,7 @@ html,body{margin:0;padding:0;height:100%}
 --warn:oklch(.72 .14 70);--warn-t:oklch(.52 .14 62);--warn-fg:oklch(.38 .05 62);--warn-w:oklch(.78 .13 75/.14);--warn-b:oklch(.7 .14 75/.35);
 --sh1:oklch(.3 .04 265/.03);--sh2:oklch(.3 .04 265/.04);--sh3:oklch(.3 .04 265/.05);--sh4:oklch(.3 .04 265/.12);--sh5:oklch(.3 .04 265/.13);--sh6:oklch(.3 .04 265/.14);--sh7:oklch(.3 .04 265/.3);--sh8:oklch(.3 .04 265/.4);--sh9:oklch(.3 .04 265/.45);--sh10:oklch(.3 .04 265/.5);
 --cat-work:oklch(.58 .16 265);--cat-news:oklch(.6 .02 265);--cat-rec:oklch(.6 .12 200);--cat-soc:oklch(.64 .14 35);--cat-fin:oklch(.66 .13 88);--cat-per:oklch(.62 .13 150);--cat-tra:oklch(.62 .13 320);--cat-urg:oklch(.56 .19 25);--cat-none:oklch(.5 .02 265);
---sel:oklch(.86 .07 255);--bar:oklch(.55 .03 265/.24);--bar-hover:oklch(.55 .03 265/.42);--bar-active:oklch(.5 .03 265/.58);--bar-track:oklch(.55 .03 265/.07)}
+--seg-ink:oklch(.21 .025 265);--sel:oklch(.86 .07 255);--bar:oklch(.55 .03 265/.24);--bar-hover:oklch(.55 .03 265/.42);--bar-active:oklch(.5 .03 265/.58);--bar-track:oklch(.55 .03 265/.07)}
 [data-theme="dark"]{
 --bg:oklch(.145 .01 265);
 --wash:radial-gradient(62% 46% at 8% -2%,oklch(.3 .055 262/.5),transparent 72%),radial-gradient(48% 38% at 96% 4%,oklch(.26 .035 285/.42),transparent 74%),radial-gradient(64% 48% at 76% 100%,oklch(.25 .028 230/.4),transparent 76%),oklch(.145 .01 265);
@@ -29,7 +29,7 @@ html,body{margin:0;padding:0;height:100%}
 --warn:oklch(.78 .14 72);--warn-t:oklch(.82 .13 75);--warn-fg:oklch(.88 .06 78);--warn-w:oklch(.7 .13 72/.16);--warn-b:oklch(.72 .14 72/.4);
 --sh1:oklch(0 0 0/.2);--sh2:oklch(0 0 0/.26);--sh3:oklch(0 0 0/.3);--sh4:oklch(0 0 0/.38);--sh5:oklch(0 0 0/.4);--sh6:oklch(0 0 0/.42);--sh7:oklch(0 0 0/.6);--sh8:oklch(0 0 0/.66);--sh9:oklch(0 0 0/.72);--sh10:oklch(0 0 0/.78);
 --cat-work:oklch(.72 .15 265);--cat-news:oklch(.72 .02 265);--cat-rec:oklch(.74 .12 200);--cat-soc:oklch(.76 .14 40);--cat-fin:oklch(.8 .13 88);--cat-per:oklch(.76 .14 152);--cat-tra:oklch(.74 .13 320);--cat-urg:oklch(.68 .18 25);--cat-none:oklch(.68 .02 265);
---sel:oklch(.4 .08 255);--bar:oklch(.82 .016 265/.17);--bar-hover:oklch(.82 .016 265/.32);--bar-active:oklch(.84 .018 265/.46);--bar-track:oklch(.82 .016 265/.06)}
+--seg-ink:oklch(.17 .02 265);--sel:oklch(.4 .08 255);--bar:oklch(.82 .016 265/.17);--bar-hover:oklch(.82 .016 265/.32);--bar-active:oklch(.84 .018 265/.46);--bar-track:oklch(.82 .016 265/.06)}
 body{background:var(--bg);font-family:'Plus Jakarta Sans',-apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 a{color:var(--acc);text-decoration:none}
 a:hover{color:var(--acc-t)}
@@ -70,6 +70,13 @@ input::placeholder,textarea::placeholder{color:var(--fg5)}
   *{scrollbar-width:thin;scrollbar-color:var(--bar) transparent}
 }
 [data-theming="1"] *{transition:background-color .22s cubic-bezier(.32,.72,0,1),border-color .22s cubic-bezier(.32,.72,0,1),box-shadow .22s cubic-bezier(.32,.72,0,1) !important}
+/* Segmented Local|Cloud control. Hover and press need real pseudo-classes, so these
+   live here rather than in the inline styles that cover the rest of the control.
+   .seg-btn--off is the inactive half: only it brightens on hover, so hovering the
+   already-active side does not fight its own tint. */
+.seg-btn{-webkit-tap-highlight-color:transparent;transition:color .2s cubic-bezier(.32,.72,0,1)}
+.seg-btn--off:not(:disabled):hover{color:var(--fg2)}
+.seg-thumb{will-change:transform}
 @keyframes apSheen{0%,100%{opacity:.55}50%{opacity:.85}}
 @keyframes apSkel{0%,100%{opacity:.45}50%{opacity:.8}}
 @media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important}}

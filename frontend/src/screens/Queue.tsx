@@ -75,6 +75,19 @@ export function Queue(p: SharedProps) {
                   {pr.rationale || "No rationale recorded."}
                 </p>
 
+                {/* Approving a reply you have not read is not a review, so the draft is
+                    shown in full rather than summarised or hidden behind the card. */}
+                {pr.type === "draft" && typeof pr.payload?.body === "string" && (
+                  <div style={{ marginTop: "11px", padding: "11px 13px", borderRadius: "12px", background: "var(--s2)", border: "1px solid var(--s4)" }}>
+                    <div style={{ fontSize: "10.5px", fontWeight: 700, letterSpacing: ".09em", textTransform: "uppercase", color: "var(--fg5)", marginBottom: "7px" }}>
+                      Draft to {String(pr.payload.to ?? "unknown recipient")}
+                    </div>
+                    <p style={{ margin: 0, fontSize: "12.5px", lineHeight: 1.65, color: "var(--fg2)", whiteSpace: "pre-wrap" }}>
+                      {pr.payload.body as string}
+                    </p>
+                  </div>
+                )}
+
                 <div style={{ display: "flex", alignItems: "center", gap: "7px", marginTop: "14px", flexWrap: "wrap" }}>
                   <button onClick={() => resolve(pr.id, true)} style={btn("small primary")}>
                     <Icon id="ap-check" size={12} />Approve

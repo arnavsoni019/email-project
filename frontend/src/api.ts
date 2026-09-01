@@ -101,9 +101,21 @@ export interface JobStatus {
   error: string | null;
 }
 
+/** FastAPI puts the useful sentence in `detail`; without this the UI would surface
+ *  "400 /api/actions" instead of "…is an unattended mailbox — a reply would bounce." */
+async function errorText(res: Response, path: string): Promise<string> {
+  try {
+    const d = (await res.json()) as { detail?: unknown };
+    if (typeof d?.detail === "string" && d.detail) return d.detail;
+  } catch {
+    // Non-JSON error body (a proxy page, a crash): fall through to the status line.
+  }
+  return `${res.status} ${path}`;
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`);
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  if (!res.ok) throw new Error(await errorText(res, path));
   return res.json() as Promise<T>;
 }
 
@@ -113,7 +125,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`${res.status} ${path}`);
+  if (!res.ok) throw new Error(await errorText(res, path));
   return res.json() as Promise<T>;
 }
 

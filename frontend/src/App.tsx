@@ -243,10 +243,17 @@ export default function App() {
   const propose = useCallback(async (
     type: string, targetId: string, rationale: string, payload?: Record<string, unknown>,
   ) => {
-    await api.propose({ type, target_id: targetId, rationale, payload });
+    try {
+      await api.propose({ type, target_id: targetId, rationale, payload });
+    } catch (e) {
+      // A draft can legitimately be refused — an unattended sender, or an empty
+      // generation. Saying why beats a silent no-op the user has to guess at.
+      flash(e instanceof Error ? e.message : "Could not queue that action");
+      return;
+    }
     setProposals(await api.actions());
     flash(
-      type === "draft" ? "Reply drafted — queued for approval" : "Proposed — queued for approval",
+      type === "draft" ? "Reply drafted — read it before approving" : "Proposed — queued for approval",
       "Review",
       () => { setToast(null); goScreen("queue"); },
     );

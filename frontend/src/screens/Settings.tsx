@@ -9,15 +9,93 @@ import { useState } from "react";
 import { api } from "../api";
 import { Icon } from "../Sprite";
 import type { SharedProps } from "../types";
-import { catColor, glass } from "../ui";
+import { EASE, catColor, glass } from "../ui";
 
+// One entry per task name passed to get_llm(task) in the backend. A task missing here
+// is still cloud-eligible if .env permits it, but has no switch — so the screen would
+// under-report where text goes. Keep this list in step with the get_llm call sites.
 const TASKS = [
   { id: "categorise", t: "Categorise", note: "sender + subject only" },
   { id: "summarise", t: "Summarise", note: "full email body" },
   { id: "triage", t: "Triage", note: "full email body" },
+  { id: "propose", t: "Action rationales", note: "sender + subject + category" },
   { id: "draft", t: "Draft replies", note: "thread history" },
   { id: "ask", t: "Ask", note: "matched emails" },
 ];
+
+/** Two-state segmented control: Local | Cloud.
+ *
+ *  A solid block slides between two halves: green on Local, amber on Cloud, with dark
+ *  ink on top. Flat fill, tight radius, one short transition — no glow, no bounce, no
+ *  translucent surface. The state is a colour you can name from across the room, and
+ *  the label says where the text goes rather than making "on" mean something. */
+function Segmented({ value, onChange, disabled, small, title }: {
+  value: "local" | "cloud";
+  onChange: (v: "local" | "cloud") => void;
+  disabled?: boolean;
+  small?: boolean;
+  title?: string;
+}) {
+  const cloud = value === "cloud";
+  const radius = small ? "7px" : "8px";
+
+  const seg = (id: "local" | "cloud", label: string, icon: string) => {
+    const on = value === id;
+    return (
+      <button
+        className={`seg-btn${on ? "" : " seg-btn--off"}`}
+        onClick={() => !disabled && onChange(id)}
+        disabled={disabled}
+        aria-pressed={on}
+        style={{
+          // Above the thumb, which is absolutely positioned behind both halves.
+          position: "relative", zIndex: 1,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          gap: small ? "5px" : "6px",
+          padding: small ? "3.5px 11px" : "6px 15px",
+          border: "none", background: "transparent", borderRadius: radius,
+          // Dark ink on the solid fill; muted grey when flat. No tinted text — the fill
+          // carries the colour, so the label stays plain.
+          color: on ? "var(--seg-ink)" : "var(--fg4)",
+          fontSize: small ? "10.5px" : "12px", fontWeight: on ? 650 : 500,
+          letterSpacing: "-.005em",
+          cursor: disabled ? "not-allowed" : "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        <Icon id={icon} size={small ? 10 : 12} style={{ flex: "none" }} />
+        {label}
+      </button>
+    );
+  };
+
+  return (
+    <div title={title} style={{
+      // Equal columns are what make translateX(100%) land exactly on the other half.
+      position: "relative", display: "inline-grid", gridTemplateColumns: "1fr 1fr",
+      flex: "none", padding: "2px", borderRadius: small ? "9px" : "10px",
+      background: "var(--s3)", border: "1px solid var(--edge)",
+      opacity: disabled ? 0.45 : 1,
+      transition: `opacity .18s ${EASE}`,
+    }}>
+      {/* A single solid block that slides. The fill colour crossfades green -> amber as
+          it travels, so the colour change and the movement are one gesture. */}
+      <span
+        aria-hidden
+        className="seg-thumb"
+        style={{
+          position: "absolute", top: "2px", bottom: "2px", left: "2px",
+          width: "calc(50% - 2px)", borderRadius: radius,
+          background: cloud ? "var(--warn)" : "var(--ok)",
+          transform: cloud ? "translateX(100%)" : "translateX(0)",
+          transition: `transform .22s ${EASE},background-color .22s ${EASE}`,
+        }}
+      />
+      {seg("local", "Local", "ap-monitor")}
+      {seg("cloud", "Cloud", "ap-cloud")}
+    </div>
+  );
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -50,9 +128,14 @@ export function Settings(p: SharedProps) {
     }
   };
 
-  const toggleTask = (id: string) => {
+  // Explicit target state rather than a toggle: the segmented control says which side
+  // was clicked, so clicking "Local" on an already-local row is a no-op instead of
+  // silently flipping it to cloud.
+  const setTask = (id: string, cloud: boolean) => {
     if (!ceiling.includes(id)) return; // outside the ceiling — server would reject anyway
-    const next = allowed.includes(id) ? allowed.filter((x) => x !== id) : [...allowed, id];
+    const next = cloud
+      ? Array.from(new Set([...allowed, id]))
+      : allowed.filter((x) => x !== id);
     save({ cloud_allowed_tasks: next });
   };
 
@@ -68,20 +151,21 @@ export function Settings(p: SharedProps) {
 
         {/* privacy */}
         <Section title="Cloud AI">
-          <div style={{ display: "flex", alignItems: "center", gap: "11px", padding: "9px 11px", borderRadius: "14px", background: cloudOn ? "var(--warn-w)" : "var(--s2)", border: `1px solid ${cloudOn ? "var(--warn-b)" : "var(--s4)"}` }}>
-            <span style={{ width: "8px", height: "8px", borderRadius: "99px", flex: "none", background: cloudOn ? "var(--warn)" : "var(--ok)" }} />
+          {/* Surface stays neutral in both states — the dot and the control carry the
+              signal, so turning cloud on no longer floods the panel with one colour. */}
+          <div style={{ display: "flex", alignItems: "center", gap: "11px", padding: "10px 12px", borderRadius: "14px", background: "var(--s2)", border: "1px solid var(--s4)" }}>
+            <span style={{ width: "8px", height: "8px", borderRadius: "99px", flex: "none", background: cloudOn ? "var(--warn)" : "var(--ok)", transition: "background-color .16s ease" }} />
             <span style={{ fontSize: "13px", fontWeight: 600 }}>
               {cloudOn ? "Cloud enabled" : "Off — everything runs on this machine"}
             </span>
-            <button
-              onClick={() => save({ cloud_enabled: !cloudOn })}
-              disabled={!configurable || busy}
-              title={configurable ? undefined : "Set CLOUD_ALLOWED_TASKS in .env to enable this switch"}
-              aria-pressed={cloudOn}
-              style={{ marginLeft: "auto", flex: "none", width: "40px", height: "22px", padding: "2px", borderRadius: "99px", border: `1px solid ${cloudOn ? "var(--warn-b)" : "var(--edge)"}`, background: cloudOn ? "var(--warn)" : "var(--s5)", cursor: configurable && !busy ? "pointer" : "not-allowed", opacity: configurable ? 1 : 0.45, transition: "background-color .18s ease" }}
-            >
-              <span style={{ display: "block", width: "16px", height: "16px", borderRadius: "99px", background: "var(--s1)", transform: cloudOn ? "translateX(18px)" : "translateX(0)", transition: "transform .18s cubic-bezier(.32,.72,0,1)" }} />
-            </button>
+            <div style={{ marginLeft: "auto" }}>
+              <Segmented
+                value={cloudOn ? "cloud" : "local"}
+                onChange={(v) => save({ cloud_enabled: v === "cloud" })}
+                disabled={!configurable || busy}
+                title={configurable ? undefined : "Set CLOUD_ALLOWED_TASKS in .env to enable this switch"}
+              />
+            </div>
           </div>
 
           {cloudOn && !keyPresent && (
@@ -105,24 +189,26 @@ export function Settings(p: SharedProps) {
               // see the full surface rather than wondering what is missing.
               const reachable = ceiling.includes(t.id);
               return (
-                <button
+                // A div, not a button: the row now contains its own buttons, and
+                // nesting interactive elements breaks both HTML and keyboard nav.
+                <div
                   key={t.id}
-                  onClick={() => toggleTask(t.id)}
-                  disabled={!reachable || !cloudOn || busy}
                   title={reachable ? undefined : `Not permitted by CLOUD_ALLOWED_TASKS in .env`}
-                  style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", padding: "9px 11px", borderRadius: "13px", border: "none", background: "transparent", textAlign: "left", cursor: reachable && cloudOn && !busy ? "pointer" : "not-allowed", opacity: reachable ? 1 : 0.5 }}
+                  style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", padding: "7px 11px", borderRadius: "13px", opacity: reachable ? 1 : 0.5 }}
                 >
-                  <span style={{ width: "17px", height: "17px", flex: "none", display: "grid", placeItems: "center", border: `1px solid ${on ? "var(--warn)" : "var(--edge)"}`, borderRadius: "6px", background: on ? "var(--warn)" : "var(--s4)", color: "var(--s9)" }}>
-                    {on && <Icon id="ap-check" size={11} />}
-                  </span>
                   <span style={{ minWidth: 0 }}>
                     <span style={{ display: "block", fontSize: "12.5px", fontWeight: 500 }}>{t.t}</span>
                     <span style={{ display: "block", fontSize: "11px", color: "var(--fg5)", marginTop: "2px" }}>{t.note}</span>
                   </span>
-                  <span style={{ marginLeft: "auto", fontSize: "10.5px", fontWeight: 700, letterSpacing: ".09em", textTransform: "uppercase", color: on ? "var(--warn-t)" : "var(--ok-t)" }}>
-                    {on ? "cloud" : "local"}
-                  </span>
-                </button>
+                  <div style={{ marginLeft: "auto" }}>
+                    <Segmented
+                      small
+                      value={on ? "cloud" : "local"}
+                      onChange={(v) => setTask(t.id, v === "cloud")}
+                      disabled={!reachable || !cloudOn || busy}
+                    />
+                  </div>
+                </div>
               );
             })}
           </div>

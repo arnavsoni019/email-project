@@ -1,6 +1,10 @@
 /** SVG symbol sprite extracted VERBATIM from the Aurora Pro design file.
  *  Injected as raw HTML so the icon paths stay byte-identical to the design.
- *  Use with: <svg width={13} height={13}><use href="#ap-inbox" /></svg> */
+ *  Use with: <svg width={13} height={13}><use href="#ap-inbox" /></svg>
+ *
+ *  ap-monitor and ap-cloud at the end are ADDITIONS, not from the design file — the
+ *  Local|Cloud switch needed a shape for each destination and the design had neither.
+ *  Everything above them is still byte-identical. */
 
 export const SPRITE_HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <symbol id="ap-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"></path><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"></path></symbol>
@@ -25,6 +29,8 @@ export const SPRITE_HTML = `<svg width="0" height="0" style="position:absolute" 
 <symbol id="ap-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M6.3 17.7l-1.4 1.4M19.1 4.9l-1.4 1.4"></path></symbol>
 <symbol id="ap-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></symbol>
 <symbol id="ap-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.5 2"></path></symbol>
+<symbol id="ap-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="19" height="13" rx="2"></rect><path d="M8.5 20.5h7M12 16.5v4"></path></symbol>
+<symbol id="ap-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path></symbol>
 </defs></svg>`;
 
 export function Sprite() {

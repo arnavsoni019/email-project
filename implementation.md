@@ -171,7 +171,11 @@ mailorg/
 - Agent tools that emit **proposed actions** (label/archive/draft) into the queue instead of executing. Approve/reject UI. `executor` applies approved actions via Gmail API.
 
 **Phase 6 — Cloud opt-in + polish**
-- `CloudProvider` wired behind the router (exact model + SDK pinned at build time). Consent UI showing what text leaves the machine. Then: Outlook/MS-Graph provider behind `EmailProvider`.
+- `CloudProvider` wired behind the router (exact model + SDK pinned at build time). Consent is
+  the Settings switch itself: a task shows `LOCAL`/`CLOUD` and the destination model and host
+  are named on screen. **Decided against a per-question consent preview** — the switch is a
+  deliberate act, and a dialog confirmed on every question becomes a reflex rather than
+  consent. Then: Outlook/MS-Graph provider behind `EmailProvider`.
 
 ---
 
@@ -187,8 +191,9 @@ mailorg/
   the agent retrieves the right emails and answers correctly.
 - **Phase 5:** trigger a proposed label/archive/draft; confirm **nothing changes in Gmail
   until approved**, then confirm approval applies the change via the API.
-- **Phase 6:** flip a task to cloud; confirm the consent preview shows the exact payload and
-  that local-only tasks still never call out.
+- **Phase 6:** flip a task to cloud; confirm the Settings screen names the destination model
+  and marks that task `CLOUD`, that the request actually reaches the provider (check the
+  provider dashboard, not just the app), and that local-only tasks still never call out.
 
 ---
 

@@ -14,8 +14,11 @@ ways:
 3. **Batch ceiling** (``settings.actions_batch_limit``). A bad proposal run should be
    able to touch a handful of messages, not the whole mailbox.
 4. **Reversibility.** Only archive/label/draft are expressible. Nothing here deletes,
-   marks spam, or sends mail — ``gmail.send`` is never requested, so no bug can email
-   someone as the user.
+   marks spam, or sends mail. Note this is a property of *this code*, not of the OAuth
+   grant: ``gmail.modify`` also permits sending, and Google offers no label-only write
+   scope. The guarantee is that no send call exists anywhere in the codebase — which is
+   why every write must funnel through ``_apply_live`` rather than calling the provider
+   directly.
 
 Each applied action stores what was done in ``actions.result``, including the undo
 payload captured at propose time, so a reversal is a lookup rather than a guess.
@@ -88,8 +91,17 @@ def _apply_live(
         provider.modify_message(action["target_id"], add_label_ids=[label_id])
         return {"added": [name], "labelId": label_id, "undo": {"removeLabelIds": [label_id]}}
     if kind == "draft":
+        to = (payload.get("to") or "").strip()
+        body = (payload.get("body") or "").strip()
+        # Fail closed. Python's email library accepts a None recipient and stores the
+        # literal string "None", so an incomplete payload would otherwise produce a real
+        # Gmail draft addressed to nobody rather than an error.
+        if not to:
+            raise ValueError("draft has no recipient; refusing to create it")
+        if not body:
+            raise ValueError("draft has no body; refusing to create an empty draft")
         draft_id = provider.create_draft(
-            thread_id=payload.get("threadId"), to=payload.get("to"), body=payload.get("body", "")
+            thread_id=payload.get("threadId"), to=to, body=body
         )
         # A draft is created, never sent; deleting it is the undo.
         return {"draftId": draft_id, "undo": {"deleteDraft": draft_id}}

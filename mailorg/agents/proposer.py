@@ -66,12 +66,22 @@ _RATIONALE_INSTRUCTION = (
     "Be concrete about what the email is. No preamble, no greeting, one sentence only."
 )
 
+# "on the owner's behalf" used to be in the first line, and the model read it as a
+# third party: replies came back saying "I'll confirm with the owner and get back to
+# you", which is what an outsourced assistant writes, not what the recipient writes.
+# Casting the model AS the recipient, and banning third-person self-reference outright,
+# is what fixed it.
 _DRAFT_INSTRUCTION = (
-    "Write a brief, polite reply to the email below on the owner's behalf.\n"
+    "You are the person who received the email below. Write your reply to it, in the "
+    "first person, as yourself.\n"
     "Rules:\n"
     "- 2-4 sentences. No subject line, no signature block, no placeholders like [Name].\n"
-    "- If the email asks a question you cannot answer from its content, acknowledge it "
-    "and say the owner will follow up.\n"
+    "- Never refer to yourself in the third person, and never mention 'the owner', "
+    "'the user', or an assistant. You are the one sending this reply.\n"
+    "- Answer what was actually asked. If it asks something you cannot know from the "
+    "email itself, say you will check and come back with an answer.\n"
+    "- Match the sender's register: relaxed with friends and family, plain and direct "
+    "with colleagues.\n"
     "- Reply with the message body only."
 )
 
