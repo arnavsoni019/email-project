@@ -143,21 +143,28 @@ export const api = {
   stats: () => get<Stats>("/api/stats"),
   settings: () => get<AppSettings>("/api/settings"),
   actions: () => get<{ actions: ProposedAction[] }>("/api/actions").then((d) => d.actions),
+  // These go through post(), not a bare fetch: a bare fetch resolves on a 4xx and hands
+  // back {detail: "..."} as though it succeeded, so a refusal would look like a success
+  // and the caller's error handling would never run.
   propose: (body: {
     type: string;
     target_id: string;
     payload?: Record<string, unknown>;
     rationale?: string;
-  }) =>
-    fetch(`${BASE}/api/actions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json()),
+  }) => post<{ id: number; status: string }>("/api/actions", body),
   decide: (id: number, approve: boolean) =>
-    fetch(`${BASE}/api/actions/${id}/decide?approve=${approve}`, { method: "POST" }).then((r) =>
-      r.json(),
-    ),
+    post<{ id: number; status: string }>(`/api/actions/${id}/decide?approve=${approve}`),
+
+  // --- inbox draft composer. Generate and revise persist nothing; only save writes.
+  draft: (targetId: string) => post<{ body: string }>("/api/draft", { target_id: targetId }),
+  reviseDraft: (targetId: string, draft: string, feedback: string) =>
+    post<{ body: string }>("/api/draft/revise", {
+      target_id: targetId, draft, feedback,
+    }),
+  saveDraft: (targetId: string, body: string) =>
+    post<{ actionId: number; draftId: string; to: string }>("/api/draft/save", {
+      target_id: targetId, body,
+    }),
   startSync: (body: { full?: boolean; max_messages?: number | null; process?: boolean } = {}) =>
     post<JobStatus>("/api/sync", body),
   startProcess: (body: { all?: boolean; limit?: number | null } = {}) =>

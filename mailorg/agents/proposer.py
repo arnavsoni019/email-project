@@ -85,6 +85,19 @@ _DRAFT_INSTRUCTION = (
     "- Reply with the message body only."
 )
 
+# Revision is a different job from drafting: the previous version is mostly right, or the
+# user would have asked for a new one. Without an explicit instruction to preserve what
+# was not mentioned, the model rewrites wholesale and quietly discards the sentences the
+# user had already accepted — which makes iterating feel like starting over.
+_REVISE_INSTRUCTION = (
+    "Below is an email you received, your current reply to it, and one change to make.\n"
+    "Apply ONLY that change. Keep every other sentence as it is — same wording, same "
+    "order, same tone. Do not add a greeting, signature or subject line.\n"
+    "Stay in the first person as the person replying.\n"
+    "Reply with the full revised message body only, with no commentary about what you "
+    "changed."
+)
+
 
 def _existing_keys(conn: sqlite3.Connection) -> set[tuple[str, str]]:
     """(type, target_id) pairs already queued or applied.

@@ -42,6 +42,40 @@ class WriteScopeMissing(RuntimeError):
     """Raised when a live run is attempted without Gmail write permission."""
 
 
+class DryRunActive(RuntimeError):
+    """Raised when a single action is applied while ``actions_dry_run`` is set."""
+
+
+class DemoStoreRefused(RuntimeError):
+    """Raised when a live write is attempted while pointed at the demo mailbox."""
+
+
+def _refuse_demo_store(settings: Settings) -> None:
+    """Never write to the real mailbox on behalf of synthetic proposals.
+
+    ``DB_PATH`` selects which mailbox is *read*, but Gmail credentials always point at
+    the real account — so a live run against the demo store would file replies to
+    invented people into the owner's actual Gmail. Checked here rather than in the web
+    layer so the CLI is covered by the same rule.
+    """
+    if "demo" in settings.db_path.name.lower():
+        raise DemoStoreRefused(
+            f"Refusing to write to Gmail while reading {settings.db_path}. These are "
+            "synthetic proposals; applying them would put them in your real mailbox."
+        )
+
+
+def _require_live_preconditions(settings: Settings) -> None:
+    """Every check that must pass before any Gmail write, in one place."""
+    _refuse_demo_store(settings)
+    if MODIFY_SCOPE not in settings.gmail_scopes:
+        raise WriteScopeMissing(
+            "Live execution needs Gmail write access. Add "
+            f"'{MODIFY_SCOPE}' to GMAIL_SCOPES and re-authenticate "
+            "(delete data/token.json, then run a sync to consent again)."
+        )
+
+
 def _label_name(conn: sqlite3.Connection, action: sqlite3.Row, payload: dict[str, Any]) -> str | None:
     """The label to apply, falling back to the message's category.
 
@@ -115,12 +149,7 @@ def run(*, live: bool = False, settings: Settings | None = None) -> dict[str, An
 
     provider = None
     if not dry_run:
-        if MODIFY_SCOPE not in settings.gmail_scopes:
-            raise WriteScopeMissing(
-                "Live execution needs Gmail write access. Add "
-                f"'{MODIFY_SCOPE}' to GMAIL_SCOPES and re-authenticate "
-                "(delete data/token.json, then run a sync to consent again)."
-            )
+        _require_live_preconditions(settings)
         from ..providers.email.gmail import GmailProvider  # imported only on the live path
 
         provider = GmailProvider(settings)
@@ -165,6 +194,74 @@ def run(*, live: bool = False, settings: Settings | None = None) -> dict[str, An
             "failed": failed,
             "planned": planned,
         }
+    finally:
+        conn.close()
+
+
+def ensure_can_write(settings: Settings | None = None) -> None:
+    """Raise if a live write is not permitted right now. No network, no side effects.
+
+    Callers that create an action row before applying it must call this *first*.
+    Inserting an ``approved`` row and only then discovering that writing is refused
+    leaves an armed proposal behind that the next ``--live`` run would apply — the
+    opposite of what the user was told when their save failed.
+    """
+    settings = settings or get_settings()
+    if settings.actions_dry_run:
+        raise DryRunActive(
+            "ACTIONS_DRY_RUN is on, so nothing is written to Gmail. Set "
+            "ACTIONS_DRY_RUN=false in .env to let this save."
+        )
+    _require_live_preconditions(settings)
+
+
+def apply_one(action_id: int, *, settings: Settings | None = None) -> dict[str, Any]:
+    """Apply one already-approved action immediately, and record the result.
+
+    This exists so the Inbox composer can save a reply the user has just read and edited
+    without a second trip through the approval queue. It deliberately routes through
+    ``_apply_live`` rather than calling the provider, so the four guards, the undo
+    payload and the ``actions`` audit trail all still apply — the review step is skipped,
+    the machinery is not.
+
+    ``actions_dry_run`` is honoured rather than bypassed: a project with two different
+    safety regimes is one where nobody can say what a flag means.
+    """
+    settings = settings or get_settings()
+    ensure_can_write(settings)
+
+    from ..providers.email.gmail import GmailProvider
+
+    provider = GmailProvider(settings)
+    provider.authenticate()
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+        action = conn.execute("SELECT * FROM actions WHERE id = ?", (action_id,)).fetchone()
+        if action is None:
+            raise ValueError(f"action {action_id} not found")
+        if action["status"] != "approved":
+            raise ValueError(f"action {action_id} is {action['status']!r}, not approved")
+
+        payload = json.loads(action["payload"] or "{}")
+        label = _label_name(conn, action, payload) if action["type"] == "label" else None
+        description = _describe(action, payload, label)
+        try:
+            result = _apply_live(provider, action, payload, label)
+        except Exception as exc:
+            conn.execute(
+                "UPDATE actions SET status='failed', result=? WHERE id=?",
+                (json.dumps({"call": description, "error": f"{type(exc).__name__}: {exc}"}), action_id),
+            )
+            conn.commit()
+            raise
+        conn.execute(
+            "UPDATE actions SET status='applied', result=? WHERE id=?",
+            (json.dumps({"call": description, **result, "appliedTs": int(time.time())}), action_id),
+        )
+        conn.commit()
+        return {"id": action_id, "call": description, **result}
     finally:
         conn.close()
 

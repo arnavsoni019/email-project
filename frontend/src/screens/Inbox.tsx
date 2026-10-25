@@ -1,7 +1,8 @@
 /** Inbox — 3-pane. Ported from the Aurora Pro design (list rows have two variants:
  *  "full" for action/fyi, and a compact "quiet" row for ignore). */
 
-import { memo, useCallback, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useState, type CSSProperties } from "react";
+import { DraftComposer } from "../DraftComposer";
 import { HtmlBody } from "../HtmlBody";
 import { Resizer, usePaneWidth } from "../Resizer";
 import { Icon } from "../Sprite";
@@ -168,9 +169,10 @@ export function Inbox(p: SharedProps) {
     setHover, select, archive, propose, prioFilter, catFilter, clearFilter, back, stats,
   } = p;
   const [correcting, setCorrecting] = useState(false);
-  // Drafting runs a model and takes seconds, so the button has to say so — otherwise a
-  // dead-looking button invites a second click and a second proposal.
-  const [drafting, setDrafting] = useState(false);
+  const [composing, setComposing] = useState(false);
+  // Opening a draft is a per-message decision. Without this, selecting the next email
+  // would silently start generating a reply to it.
+  useEffect(() => { setComposing(false); }, [selId]);
   const [showEarlier, setShowEarlier] = useState(false);
   // Held as an id rather than a boolean so selecting another message collapses back to
   // the summary automatically — no effect needed, and no stale "expanded" flag.
@@ -477,20 +479,11 @@ export function Inbox(p: SharedProps) {
 
               <div style={{ flex: "none", padding: "12px 26px", borderTop: "1px solid var(--rule)", display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
                 <button
-                  onClick={async () => {
-                    setDrafting(true);
-                    try {
-                      // No payload: the server looks the message up and writes the reply,
-                      // so the recipient and thread come from one source of truth.
-                      await propose("draft", sel.id, "Requested from the reading pane.");
-                    } finally {
-                      setDrafting(false);
-                    }
-                  }}
-                  disabled={drafting}
-                  style={{ ...btn("primary"), opacity: drafting ? 0.6 : 1, cursor: drafting ? "wait" : "pointer" }}
+                  onClick={() => setComposing(true)}
+                  disabled={composing}
+                  style={{ ...btn("primary"), opacity: composing ? 0.6 : 1 }}
                 >
-                  <Icon id="ap-reply" />{drafting ? "Drafting…" : "Draft reply"}
+                  <Icon id="ap-reply" />Draft reply
                 </button>
                 <button
                   onClick={() => propose("label", sel.id, `Requested from the reading pane. Suggested label ${sel.cat}.`, { labelName: `mailorg/${sel.cat}` })}
@@ -502,9 +495,21 @@ export function Inbox(p: SharedProps) {
                   <Icon id="ap-archive" style={{ opacity: 0.55 }} />Archive
                 </button>
                 <span style={{ marginLeft: "auto", fontSize: "11px", color: "var(--fg5)", maxWidth: "230px", lineHeight: 1.45 }}>
-                  Every action is proposed — nothing changes until you approve it.
+                  Label and archive are proposed — nothing changes until you approve them.
                 </span>
               </div>
+
+              {composing && (
+                <DraftComposer
+                  // Keyed by message: switching mail must build a fresh composer rather
+                  // than leave the previous draft attached to the wrong sender.
+                  key={sel.id}
+                  targetId={sel.id}
+                  to={sel.email}
+                  onClose={() => setComposing(false)}
+                  flash={p.flash}
+                />
+              )}
             </div>
           ) : (
             <div style={{ height: "100%", display: "grid", placeItems: "center", padding: "24px" }}>

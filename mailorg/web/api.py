@@ -20,7 +20,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from ..agents.proposer import _DRAFT_INSTRUCTION, _can_reply
+from ..agents.executor import (
+    DemoStoreRefused,
+    DryRunActive,
+    WriteScopeMissing,
+    apply_one,
+    ensure_can_write,
+)
+from ..agents.proposer import _DRAFT_INSTRUCTION, _REVISE_INSTRUCTION, _can_reply
 from ..config import get_settings
 from ..db import get_conn, init_db
 from ..htmlmail import sanitize
@@ -395,6 +402,131 @@ def create_action(action: ActionCreate) -> dict[str, Any]:
         return {"id": cur.lastrowid, "status": "proposed"}
     finally:
         conn.close()
+
+
+# --- inbox draft composer -----------------------------------------------------
+# Generation and revision persist nothing: a reply you are still working on is not a
+# proposal, and half-written drafts should not accumulate in the approval queue. Only
+# /save writes a row, and it writes one that is already approved — you reviewed the text
+# in the composer, so a second approval would be reviewing your own edit.
+class DraftRequest(BaseModel):
+    target_id: str
+
+
+class ReviseRequest(BaseModel):
+    target_id: str
+    draft: str
+    feedback: str
+
+
+class DraftSaveRequest(BaseModel):
+    target_id: str
+    body: str
+
+
+def _message_for_draft(conn: sqlite3.Connection, target_id: str) -> sqlite3.Row:
+    row = conn.execute(
+        "SELECT thread_id, from_addr, subject, body_text, snippet FROM messages WHERE id = ?",
+        (target_id,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="message not found")
+    return row
+
+
+@app.post("/api/draft")
+def generate_draft(req: DraftRequest) -> dict[str, Any]:
+    """Write a first reply. Nothing is stored — the composer holds it."""
+    conn = get_conn()
+    try:
+        return {"body": _build_draft_payload(conn, req.target_id)["body"]}
+    finally:
+        conn.close()
+
+
+@app.post("/api/draft/revise")
+def revise_draft(req: ReviseRequest) -> dict[str, Any]:
+    """Apply one instruction to an existing draft, preserving the rest."""
+    feedback = (req.feedback or "").strip()
+    if not feedback:
+        raise HTTPException(status_code=400, detail="say what should change")
+    if not (req.draft or "").strip():
+        raise HTTPException(status_code=400, detail="there is no draft to revise")
+
+    conn = get_conn()
+    try:
+        row = _message_for_draft(conn, req.target_id)
+    finally:
+        conn.close()
+
+    block = format_email_for_llm(
+        from_addr=row["from_addr"], subject=row["subject"],
+        body_text=row["body_text"], snippet=row["snippet"],
+    )
+    prompt = (
+        f"{_REVISE_INSTRUCTION}\n\n{block}\n\n"
+        f"Your current reply:\n{req.draft.strip()}\n\n"
+        f"The change to make:\n{feedback}"
+    )
+    body = str(get_llm("draft", heavy=True).invoke(prompt).content).strip()
+    if not body:
+        raise HTTPException(status_code=502, detail="the model returned an empty revision")
+    return {"body": body}
+
+
+@app.post("/api/draft/save")
+def save_draft(req: DraftSaveRequest) -> dict[str, Any]:
+    """Save the composed reply into Gmail as a draft. Never sends.
+
+    Routed through ``executor.apply_one`` rather than the Gmail provider so the write
+    still passes the executor's guards and lands in the ``actions`` audit trail.
+    """
+    body = (req.body or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="the draft is empty")
+
+    # Before writing any row. An approved row created for a save that then turns out to
+    # be forbidden would sit in the queue armed for the next --live run.
+    try:
+        ensure_can_write()
+    except DemoStoreRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DryRunActive as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WriteScopeMissing as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    conn = get_conn()
+    try:
+        row = _message_for_draft(conn, req.target_id)
+        to = (row["from_addr"] or "").strip()
+        if not _can_reply(to):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{to or 'this sender'} is an unattended mailbox — a reply would bounce.",
+            )
+        cur = conn.execute(
+            "INSERT INTO actions (type, target_id, payload, status, rationale, created_ts, decided_ts) "
+            "VALUES ('draft', ?, ?, 'approved', ?, ?, ?)",
+            (
+                req.target_id,
+                json.dumps({"threadId": row["thread_id"], "to": to, "body": body}),
+                "Composed and reviewed in the reading pane.",
+                int(time.time()), int(time.time()),
+            ),
+        )
+        conn.commit()
+        action_id = cur.lastrowid
+    finally:
+        conn.close()
+
+    try:
+        # apply_one re-checks and marks the row 'failed' if Gmail itself rejects it, so
+        # a genuine attempt stays in the audit trail rather than vanishing.
+        result = apply_one(int(action_id))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+    return {"actionId": action_id, "draftId": result.get("draftId"), "to": to}
 
 
 @app.post("/api/actions/{action_id}/decide")
