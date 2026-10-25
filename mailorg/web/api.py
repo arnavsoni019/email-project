@@ -28,7 +28,7 @@ from ..agents.executor import (
     ensure_can_write,
 )
 from ..agents.proposer import _DRAFT_INSTRUCTION, _REVISE_INSTRUCTION, _can_reply
-from ..config import get_settings
+from ..config import get_settings, is_demo_store
 from ..db import get_conn, init_db
 from ..htmlmail import sanitize
 from ..pipelines.common import format_email_for_llm
@@ -588,6 +588,15 @@ def _run_process(*, all_: bool, limit: int | None) -> None:
 @app.post("/api/sync")
 def start_sync(req: SyncRequest) -> dict[str, Any]:
     """Fetch new mail from Gmail, then (by default) enrich whatever arrived."""
+    # Syncing into the demo store would pull the owner's real mail — real senders, real
+    # subjects — into the synthetic mailbox, which is the exact disclosure the demo
+    # exists to prevent, and it cannot be undone without reseeding.
+    if is_demo_store():
+        raise HTTPException(
+            status_code=409,
+            detail="This is the demo mailbox. Syncing would pull your real mail into it. "
+                   "Run scripts/demo.sh real to switch back first.",
+        )
 
     def work() -> None:
         conn = get_conn()

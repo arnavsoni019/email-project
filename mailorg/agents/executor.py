@@ -32,7 +32,7 @@ import sqlite3
 import time
 from typing import Any
 
-from ..config import Settings, get_settings
+from ..config import Settings, get_settings, is_demo_store
 from ..db import get_conn, init_db
 
 MODIFY_SCOPE = "https://www.googleapis.com/auth/gmail.modify"
@@ -58,7 +58,7 @@ def _refuse_demo_store(settings: Settings) -> None:
     invented people into the owner's actual Gmail. Checked here rather than in the web
     layer so the CLI is covered by the same rule.
     """
-    if "demo" in settings.db_path.name.lower():
+    if is_demo_store(settings):
         raise DemoStoreRefused(
             f"Refusing to write to Gmail while reading {settings.db_path}. These are "
             "synthetic proposals; applying them would put them in your real mailbox."

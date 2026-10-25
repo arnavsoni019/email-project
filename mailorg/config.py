@@ -120,6 +120,17 @@ class Settings(BaseSettings):
         return self.cloud_enabled and task in self.cloud_allowed_tasks
 
 
+def is_demo_store(settings: "Settings | None" = None) -> bool:
+    """True when ``DB_PATH`` names a demo database (see ``mailorg.demo``).
+
+    Gmail credentials always point at the real account regardless of which database is
+    being read, so anything that crosses between the two — writing proposals out, or
+    syncing real mail in — has to know which store it is looking at.
+    """
+    settings = settings or get_settings()
+    return "demo" in settings.db_path.name.lower()
+
+
 @lru_cache
 def get_settings() -> Settings:
     """Return a cached Settings instance (read the environment once per process)."""
